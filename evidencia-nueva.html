@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Registrar evidencia · CUSTODIA</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="icon" href="favicon.svg">
+  <script src="js/sha256.js"></script>
+  <script src="js/qr.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/ui.js"></script>
+</head>
+<body>
+<script>
+UI.page({
+  active: 'evidencias.html', perms: ['EVD_CREAR'], modulo: 'Registrar evidencia',
+  render(app, u) {
+    const S = Store, db = S.db, { esc, header, footer, opts, $, $$, toLocalInput, fmtBytes } = UI;
+    const incs = db.incidentes.filter(i => i.estado === 'Abierto' || i.estado === 'En investigación');
+    let archivos = [];   // { nombre, tamano, hash, tipo_archivo, contenido_demo? }
+    let fotos = [];
+
+    app.innerHTML = header('Registro de evidencias', 'Registrar evidencia', '<span id="sub">Paso 1 de 2 · descripción y recolección.</span>') + `
+      <div class="steps"><div class="step on" id="st1"><span class="n">1</span>Datos de recolección</div><div class="step-sep"></div>
+        <div class="step" id="st2"><span class="n">2</span>Archivos e identificación</div></div>
+      <form id="f" novalidate>
+      <section class="card" id="paso1">
+        <h2>Datos de recolección</h2>
+        <div class="form-grid">
+          <div class="full"><label class="lbl">Incidente relacionado <span class="req">*</span></label>
+            <select name="id_incidente">${opts(incs, UI.param('inc') || '', i => `${i.codigo} · ${i.descripcion}`, i => i.id, 'Seleccione el incidente…')}</select></div>
+          <div><label class="lbl">Tipo de evidencia <span class="req">*</span></label>
+            <select name="id_tipo">${opts(db.tipos.filter(t => t.estado), '', t => t.nombre, t => t.id, 'Seleccione…')}</select></div>
+          <div><label class="lbl">Descripción <span class="req">*</span></label><input type="text" name="descripcion" placeholder="Ej. Memoria USB Kingston 32 GB"></div>
+          <div><label class="lbl">Origen (sistema, equipo o persona) <span class="req">*</span></label><input type="text" name="origen" placeholder="Ej. Equipo de la oficina administrativa"></div>
+          <div><label class="lbl">Lugar de recolección <span class="req">*</span></label><input type="text" name="lugar" placeholder="Ej. Oficina administrativa, escritorio 3"></div>
+          <div><label class="lbl">Medio de recolección <span class="req">*</span></label><select name="medio">${opts(S.MEDIOS, '', null, null, 'Seleccione…')}</select></div>
+          <div><label class="lbl">Fecha y hora de recolección <span class="req">*</span></label><input type="datetime-local" name="fecha_recoleccion" value="${toLocalInput()}" max="${toLocalInput()}"></div>
+
+          <fieldset class="full hidden" id="fs-disp"><legend>Dispositivo físico</legend>
+            <div class="form-grid">
+              <div><label class="lbl">Marca <span class="req">*</span></label><input type="text" name="marca"></div>
+              <div><label class="lbl">Modelo <span class="req">*</span></label><input type="text" name="modelo"></div>
+              <div><label class="lbl">Número de serie</label><input type="text" name="serie" placeholder="Si está disponible"></div>
+              <div><label class="lbl">Estado de encendido</label><select name="encendido">${opts(['Apagado', 'Encendido', 'No aplica'], 'No aplica')}</select></div>
+              <div><label class="lbl">Estado físico <span class="req">*</span></label><input type="text" name="estado_fisico" placeholder="Ej. Sin daños visibles"></div>
+              <div><label class="lbl">Embalaje <span class="req">*</span></label><input type="text" name="embalaje" placeholder="Ej. Bolsa antiestática sellada"></div>
+              <div class="full"><label class="lbl">Accesorios entregados</label><input type="text" name="accesorios" placeholder="Cargador, cables, estuche…"></div>
+            </div>
+          </fieldset>
+
+          <fieldset class="full hidden" id="fs-doc"><legend>Documento físico</legend>
+            <div class="form-grid">
+              <div><label class="lbl">Cantidad de páginas <span class="req">*</span></label><input type="number" min="1" name="paginas"></div>
+              <div><label class="lbl">Estado físico del documento <span class="req">*</span></label><input type="text" name="doc_estado" placeholder="Ej. Hoja doblada, sin manchas"></div>
+              <div class="full"><label class="lbl">¿Se escaneará ahora?</label>
+                <label class="check"><input type="radio" name="digitalizado" value="si" checked> Sí, adjuntaré el archivo escaneado en el paso 2</label>
+                <label class="check"><input type="radio" name="digitalizado" value="no"> No, queda pendiente de digitalización</label></div>
+              <div class="full hidden" id="motivo-box"><label class="lbl">Motivo de digitalización pendiente <span class="req">*</span></label>
+                <input type="text" name="motivo_pendiente" placeholder="Ej. El escáner del área no está disponible"></div>
+            </div>
+          </fieldset>
+
+          <div class="full"><label class="lbl">Fotografías del estado inicial</label>
+            <input type="file" id="fotos" accept="image/*" multiple>
+            <div class="thumbs" id="thumbs"></div>
+            <p class="note" id="foto-aviso"></p></div>
+          <div class="full"><label class="lbl">Observaciones</label><textarea name="observaciones" placeholder="Condiciones especiales, testigos, etc."></textarea></div>
+        </div>
+        <p class="note">Responsable inicial: ${esc(S.nombre(u))} · Ubicación inicial: Área de recolección.</p>
+        <div class="form-actions">
+          <button class="btn primary" type="button" id="btn-next">Continuar a archivos</button>
+          <a class="btn" href="evidencias.html">Cancelar</a>
+        </div>
+      </section>
+
+      <section class="hidden" id="paso2">
+        <div class="card">
+          <h2 id="arch-title">Archivos digitales asociados</h2>
+          <p class="muted small" id="arch-help"></p>
+          <div class="btn-row" style="margin:12px 0">
+            <label class="btn"><input type="file" id="files" multiple class="hidden">Seleccionar archivos…</label>
+            <button class="btn" type="button" id="btn-demo">Agregar archivo de prueba</button>
+          </div>
+          <div id="hashing" class="small muted"></div>
+          <div class="table-wrap"><table class="tbl"><thead><tr><th>Archivo</th><th>Tamaño</th><th>Algoritmo</th><th>Hash SHA-256</th><th></th></tr></thead><tbody id="arch-rows"></tbody></table></div>
+        </div>
+        <div class="card">
+          <h2>Identificación generada al guardar</h2>
+          <div class="fields">
+            <div class="field"><div class="k">Código único</div><div class="v">Se asignará al guardar · formato EVD-AAAA-NNNN</div></div>
+            <div class="field"><div class="k">Referencia de QR</div><div class="v normal">Ficha protegida de la evidencia; requiere autenticación y permiso para consultar.</div></div>
+          </div>
+          <div class="form-actions">
+            <button class="btn primary" type="submit">Registrar evidencia</button>
+            <button class="btn" type="button" id="btn-back">Volver al paso 1</button>
+          </div>
+        </div>
+      </section>
+      </form>`;
+
+    const f = $('#f');
+    const tipoSel = () => db.tipos.find(t => t.id === +f.id_tipo.value);
+    const sync = () => {
+      const t = tipoSel();
+      $('#fs-disp').classList.toggle('hidden', !t || t.categoria !== 'dispositivo');
+      $('#fs-doc').classList.toggle('hidden', !t || t.categoria !== 'documento');
+      const pend = f.querySelector('[name=digitalizado]:checked').value === 'no';
+      $('#motivo-box').classList.toggle('hidden', !pend);
+      $('#foto-aviso').textContent = t && t.categoria === 'dispositivo' && !fotos.length ? 'Se recomienda fotografiar el dispositivo antes de embalarlo.' : '';
+    };
+    f.id_tipo.addEventListener('change', sync);
+    $$('[name=digitalizado]').forEach(r => r.addEventListener('change', sync));
+
+    $('#fotos').addEventListener('change', async (e) => {
+      for (const file of e.target.files) {
+        try { fotos.push(await UI.thumb(file)); } catch (err) { UI.toast('No se pudo leer la imagen ' + file.name, 'error'); }
+      }
+      e.target.value = '';
+      drawFotos(); sync();
+    });
+    const drawFotos = () => {
+      $('#thumbs').innerHTML = fotos.map((src, i) => `<div style="position:relative"><img src="${src}" alt="Fotografía ${i + 1}">
+        <button type="button" class="btn sm" style="position:absolute;top:4px;right:4px;padding:2px 7px" data-del-foto="${i}">✕</button></div>`).join('');
+      $$('[data-del-foto]').forEach(b => b.onclick = () => { fotos.splice(+b.dataset.delFoto, 1); drawFotos(); sync(); });
+    };
+
+    const datos = () => {
+      const d = UI.formData(f);
+      const t = tipoSel();
+      if (t && t.categoria === 'dispositivo') d.dispositivo = { marca: d.marca, modelo: d.modelo, serie: d.serie, encendido: d.encendido, estado_fisico: d.estado_fisico, embalaje: d.embalaje, accesorios: d.accesorios };
+      if (t && t.categoria === 'documento') d.documento = { paginas: d.paginas, estado_fisico: d.doc_estado, digitalizado: d.digitalizado === 'si', motivo_pendiente: d.digitalizado === 'si' ? '' : d.motivo_pendiente };
+      d.fotos = fotos;
+      return d;
+    };
+
+    const validarPaso1 = () => {
+      const d = datos(), t = tipoSel();
+      const req = ['id_incidente', 'id_tipo', 'descripcion', 'origen', 'lugar', 'medio', 'fecha_recoleccion'];
+      if (t && t.categoria === 'dispositivo') req.push('marca', 'modelo', 'estado_fisico', 'embalaje');
+      if (t && t.categoria === 'documento') { req.push('paginas', 'doc_estado'); if (!d.documento.digitalizado) req.push('motivo_pendiente'); }
+      const faltan = req.filter(k => !String(d[k] || '').trim());
+      if (faltan.length) { UI.marcarInvalidos(faltan); UI.toast('Complete los campos obligatorios marcados en rojo.', 'error'); return false; }
+      if (new Date(d.fecha_recoleccion) > new Date()) { UI.marcarInvalidos(['fecha_recoleccion']); UI.toast('La fecha de recolección no puede ser futura.', 'error'); return false; }
+      $$('.invalid').forEach(x => x.classList.remove('invalid'));
+      return true;
+    };
+
+    const goStep = (n) => {
+      $('#paso1').classList.toggle('hidden', n !== 1);
+      $('#paso2').classList.toggle('hidden', n !== 2);
+      $('#st1').className = 'step ' + (n === 1 ? 'on' : 'done');
+      $('#st2').className = 'step ' + (n === 2 ? 'on' : '');
+      const t = tipoSel();
+      $('#sub').textContent = n === 1 ? 'Paso 1 de 2 · descripción y recolección.' : `Paso 2 de 2 · archivos e identificación · ${t.nombre}.`;
+      if (n === 2) {
+        const doc = t.categoria === 'documento', disp = t.categoria === 'dispositivo';
+        $('#arch-title').textContent = doc ? 'Archivo escaneado del documento' : disp ? 'Imagen forense u otros archivos (opcional)' : 'Archivos digitales asociados (obligatorio)';
+        $('#arch-help').textContent = doc && !datos().documento.digitalizado
+          ? 'Documento pendiente de digitalización: el escaneo se puede adjuntar después desde la ficha.'
+          : '';
+      }
+      window.scrollTo(0, 0);
+    };
+    $('#btn-next').onclick = () => { if (validarPaso1()) goStep(2); };
+    $('#btn-back').onclick = () => goStep(1);
+
+    const drawArch = () => {
+      $('#arch-rows').innerHTML = archivos.map((a, i) => `<tr><td><b>${esc(a.nombre)}</b>${a.contenido_demo ? ' <span class="badge blue">ficticio</span>' : ''}</td>
+        <td>${fmtBytes(a.tamano)}</td><td>SHA-256</td><td><code>${esc(a.hash)}</code></td>
+        <td><button type="button" class="btn sm" data-del="${i}">Quitar</button></td></tr>`).join('') || '<tr><td colspan="5" class="empty">Sin archivos agregados.</td></tr>';
+      $$('[data-del]').forEach(b => b.onclick = () => { archivos.splice(+b.dataset.del, 1); drawArch(); });
+    };
+    $('#files').addEventListener('change', async (e) => {
+      $('#hashing').textContent = 'Calculando hash SHA-256…';
+      try {
+        const t0 = performance.now();
+        const r = await UI.hashFiles(e.target.files);
+        archivos.push(...r);
+        $('#hashing').textContent = `Hash calculado para ${r.length} archivo(s) en ${((performance.now() - t0) / 1000).toFixed(2)} s.`;
+      } catch (err) { $('#hashing').textContent = ''; UI.toast('No se pudo leer el archivo: ' + err.message, 'error'); }
+      e.target.value = '';
+      drawArch();
+    });
+    $('#btn-demo').onclick = () => {
+      const d = datos();
+      const n = archivos.filter(a => a.contenido_demo).length + 1;
+      const contenido = `ARCHIVO FICTICIO DE PRUEBA\nDescripción: ${d.descripcion}\nOrigen: ${d.origen}\nGenerado: ${new Date().toISOString()}\nIdentificador: ${Math.random().toString(36).slice(2, 10)}\nSin datos reales.\n`;
+      const nombre = `archivo_prueba_${n}.txt`;
+      archivos.push({ nombre, tamano: new TextEncoder().encode(contenido).length, hash: sha256(contenido), tipo_archivo: 'Archivo ficticio de prueba', contenido_demo: contenido });
+      drawArch();
+      UI.toast('Archivo ficticio agregado. Desde la ficha podrás descargarlo para probar la verificación.', 'ok');
+    };
+
+    f.addEventListener('submit', (e) => {
+      e.preventDefault();
+      if (!validarPaso1()) { goStep(1); return; }
+      const ev = UI.intentar(() => S.crearEvidencia(datos(), archivos));
+      if (ev) UI.go(`evidencia.html?id=${ev.id}&nuevo=1`, `Evidencia ${ev.codigo} registrada. Se generaron su código y QR.`, 'ok');
+    });
+    sync(); drawArch();
+  }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Revisar alerta · CUSTODIA</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="icon" href="favicon.svg">
+  <script src="js/sha256.js"></script>
+  <script src="js/qr.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/ui.js"></script>
+</head>
+<body>
+<script>
+UI.page({
+  active: 'alertas.html', perms: ['ALE_VER', 'ALE_RESOLVER'], modulo: 'Revisar alerta',
+  render(app, u) {
+    const S = Store, db = S.db, { esc, fmt, badge, header, footer, $ } = UI;
+    const al = db.alertas.find(a => a.id === +UI.param('id'));
+    if (!al) return UI.notFound(app, 'Alerta');
+    const ev = db.evidencias.find(e => e.id === al.id_evidencia), inc = db.incidentes.find(i => i.id === al.id_incidente);
+    const ver = al.id_verificacion && db.verificaciones.find(v => v.id === al.id_verificacion);
+    const arch = ver && db.archivos.find(a => a.id === ver.id_archivo);
+    const integ = S.integridad(ev);
+    const titulos = { Integridad: 'Hash no coincidente', Seguridad: 'Intento de acceso no autorizado', 'Recepción': 'Inconsistencia en la recepción' };
+
+    app.innerHTML = header('Gestión de alertas', 'Revisar alerta',
+      `${esc(al.codigo)} · <a href="evidencia.html?id=${ev.id}">${esc(ev.codigo)}</a> · ${esc(inc.codigo)}`) + `
+      <div class="card">
+        <div class="card-head"><h2>${esc(titulos[al.tipo])}</h2>${badge(al.estado === 'Pendiente' ? 'Pendiente de revisión' : al.estado, UI.COLORS[al.estado])}</div>
+        <div class="fields">
+          <div class="field"><div class="k">Fecha automática</div><div class="v">${fmt(al.fecha_generacion)}</div></div>
+          <div class="field"><div class="k">Tipo</div><div class="v">${esc(al.tipo)}</div></div>
+          <div class="field" style="grid-column:1/-1"><div class="k">Detalle</div><div class="v normal">${esc(al.descripcion)}</div></div>
+          ${ver ? `<div class="field"><div class="k">Hash de referencia</div><div class="v"><code>${esc(ver.hash_referencia)}</code></div></div>
+            <div class="field"><div class="k">Hash calculado (${esc(ver.archivo_verificado)})</div><div class="v"><code style="color:var(--red)">${esc(ver.hash_calculado)}</code></div></div>
+            <div class="field"><div class="k">Verificación</div><div class="v normal">${esc(ver.codigo)} · ${esc(S.userName(ver.id_usuario))} · ${fmt(ver.fecha)}</div></div>
+            <div class="field"><div class="k">Archivo</div><div class="v normal">${esc(arch.nombre)}${arch.es_copia ? ' (copia de trabajo)' : ''}</div></div>` : ''}
+        </div>
+      </div>
+      <div class="card" id="res"></div>
+      `;
+
+    const box = $('#res');
+    if (al.estado === 'Resuelta') {
+      box.innerHTML = `<h2>Resolución del supervisor</h2><div class="fields">
+        <div class="field"><div class="k">Supervisor</div><div class="v">${esc(S.userName(al.id_supervisor))}</div></div>
+        <div class="field"><div class="k">Fecha de resolución</div><div class="v">${fmt(al.fecha_resolucion)}</div></div>
+        <div class="field" style="grid-column:1/-1"><div class="k">Medidas adoptadas</div><div class="v normal">${esc(al.resolucion)}</div></div></div>`;
+      return;
+    }
+    const puede = S.can('ALE_RESOLVER');
+    box.innerHTML = `<h2>Resolución del supervisor</h2>
+      ${al.estado === 'En revisión' ? `<p class="small muted">En revisión por ${esc(S.userName(al.id_supervisor))} desde ${fmt(al.fecha_revision)}.</p>` : ''}
+      <label class="lbl">Documentar revisión y medidas adoptadas <span class="req">*</span></label>
+      <textarea id="txt" ${puede ? '' : 'readonly'} placeholder="Ej. Se revisó el registro de accesos; la cuenta fue bloqueada y se notificó al área de TI."></textarea>
+      <div class="form-actions">
+        ${al.estado === 'Pendiente' ? '<button class="btn" id="rev">Marcar en revisión</button>' : ''}
+        <button class="btn primary" id="ok">Resolver con justificación</button>
+      </div>`;
+    if ($('#rev')) $('#rev').onclick = () => { if (UI.intentar(() => S.revisarAlerta(al.id))) UI.go(location.href, 'Alerta marcada en revisión.', 'ok'); };
+    $('#ok').onclick = () => { if (UI.intentar(() => S.resolverAlerta(al.id, $('#txt').value))) UI.go(location.href, 'Alerta resuelta. El hallazgo se conserva en el historial.', 'ok'); };
+  }
+});
+</script>
+</body>
+</html>

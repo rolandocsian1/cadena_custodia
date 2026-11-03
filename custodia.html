@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Custodia · CUSTODIA</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="icon" href="favicon.svg">
+  <script src="js/sha256.js"></script>
+  <script src="js/qr.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/ui.js"></script>
+</head>
+<body>
+<script>
+UI.page({
+  active: 'custodia.html', perms: ['CUS_VER', 'CUS_GESTIONAR', 'TRF_AUTORIZAR'], modulo: 'Custodia',
+  render(app, u) {
+    const S = Store, db = S.db, { esc, fmt, badge, sem, header, footer, $, $$ } = UI;
+    const evc = (id) => db.evidencias.find(e => e.id === id);
+    const mias = db.transferencias.filter(t =>
+      (t.estado === 'Pendiente de recepción' && t.id_recibe === u.id) ||
+      (t.estado === 'Pendiente de autorización' && S.can('TRF_AUTORIZAR')));
+    const pendientes = db.transferencias.filter(t => t.estado === 'Pendiente de autorización' || t.estado === 'Pendiente de recepción');
+    const bajoMi = db.evidencias.filter(e => e.id_responsable === u.id && e.estado !== 'Archivada');
+
+    const fila = (t) => {
+      const ev = evc(t.id_evidencia);
+      const accion = t.estado === 'Pendiente de autorización' && S.can('TRF_AUTORIZAR') ? 'Revisar traslado'
+        : t.estado === 'Pendiente de recepción' && t.id_recibe === u.id ? 'Confirmar recepción' : 'Ver';
+      return `<tr><td><b>${esc(t.codigo)}</b><div class="small muted">${esc(t.tipo)}</div></td>
+        <td><a href="evidencia.html?id=${ev.id}">${esc(ev.codigo)}</a><div class="small muted">${esc(ev.descripcion)}</div></td>
+        <td>${esc(S.userName(t.id_entrega))} → <b>${esc(S.userName(t.id_recibe))}</b></td>
+        <td class="small">${esc(S.ubicName(t.id_ubicacion_origen))} → ${esc(t.id_ubicacion_destino ? S.ubicName(t.id_ubicacion_destino) : 'Por asignar')}</td>
+        <td class="small">${fmt(t.fecha_solicitud)}</td><td>${badge(t.estado)}</td>
+        <td><a class="btn sm ${accion !== 'Ver' ? 'primary' : ''}" href="transferencia.html?id=${t.id}">${accion}</a></td></tr>`;
+    };
+    const tabla = (rows, vacio) => `<div class="table-wrap"><table class="tbl"><thead><tr><th>Código</th><th>Evidencia</th><th>Entrega → Recibe</th><th>Origen → Destino</th><th>Solicitud</th><th>Estado</th><th></th></tr></thead>
+      <tbody>${rows.map(fila).join('') || `<tr><td colspan="7" class="empty">${vacio}</td></tr>`}</tbody></table></div>`;
+
+    app.innerHTML = header('Cadena de custodia', 'Custodia y transferencias', '') + `
+      ${mias.length ? `<div class="card"><h2>Requieren tu acción (${mias.length})</h2>${tabla(mias, '')}</div>` : ''}
+      ${S.can('CUS_GESTIONAR') ? `<div class="card">
+        <div class="card-head"><h2>Evidencias bajo mi custodia (${bajoMi.length})</h2></div>
+        <div class="table-wrap"><table class="tbl"><thead><tr><th>Código</th><th>Descripción</th><th>Ubicación</th><th>Semáforo</th><th></th></tr></thead>
+        <tbody>${bajoMi.map(e => {
+          const tp = S.transferenciaPendiente(e.id);
+          return `<tr><td><b>${esc(e.codigo)}</b></td><td>${esc(e.descripcion)}</td><td>${esc(S.ubicName(e.id_ubicacion))}</td><td>${sem(e)}</td>
+          <td>${tp ? `<span class="small muted">${esc(tp.codigo)} pendiente</span>` : `<a class="btn sm" href="transferencia-nueva.html?ev=${e.id}">Transferir</a>`}</td></tr>`;
+        }).join('') || '<tr><td colspan="5" class="empty">No tienes evidencias bajo tu custodia.</td></tr>'}</tbody></table></div></div>` : ''}
+      <div class="card">
+        <div class="tabs" id="tabs"><button class="on" data-t="pend">Pendientes (${pendientes.length})</button><button data-t="todas">Todas (${db.transferencias.length})</button></div>
+        <div id="t-pend">${tabla(pendientes.slice().reverse(), 'No hay transferencias pendientes.')}</div>
+        <div id="t-todas" class="hidden">${tabla(db.transferencias.slice().reverse(), 'Sin transferencias registradas.')}</div>
+      </div>`;
+
+    $$('#tabs button').forEach(b => b.onclick = () => {
+      $$('#tabs button').forEach(x => x.classList.toggle('on', x === b));
+      $('#t-pend').classList.toggle('hidden', b.dataset.t !== 'pend');
+      $('#t-todas').classList.toggle('hidden', b.dataset.t !== 'todas');
+    });
+  }
+});
+</script>
+</body>
+</html>

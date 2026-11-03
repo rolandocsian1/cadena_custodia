@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bitácora de auditoría · CUSTODIA</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="icon" href="favicon.svg">
+  <script src="js/sha256.js"></script>
+  <script src="js/qr.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/ui.js"></script>
+</head>
+<body>
+<script>
+UI.page({
+  active: 'bitacora.html', perms: ['BIT_VER'], modulo: 'Bitácora de auditoría',
+  render(app, u) {
+    const S = Store, db = S.db, { esc, fmt, header, footer, opts, $, $$ } = UI;
+    const usuarios = [...new Set(db.bitacora.map(b => b.usuario))].sort();
+    const acciones = [...new Set(db.bitacora.map(b => b.accion))].sort();
+    app.innerHTML = header('Auditoría', 'Bitácora de auditoría', 'Registros de solo lectura.',
+      '<button class="btn" id="btn-verif">Verificar integridad de la bitácora</button><button class="btn" id="btn-csv">Exportar CSV</button>') + `
+      <div id="verif"></div>
+      <div class="card">
+        <h2>Consulta de acciones</h2>
+        <div class="form-grid" style="grid-template-columns:repeat(5,minmax(0,1fr));gap:14px;margin-bottom:16px" id="filtros">
+          <div><label class="lbl">Fecha</label><input type="date" id="f-fecha"></div>
+          <div><label class="lbl">Usuario</label><select id="f-usr">${opts(usuarios, '', null, null, 'Todos')}</select></div>
+          <div><label class="lbl">Acción</label><select id="f-acc">${opts(acciones, '', null, null, 'Todas')}</select></div>
+          <div><label class="lbl">Incidente</label><select id="f-inc">${opts(db.incidentes, '', i => i.codigo, i => i.id, 'Todos')}</select></div>
+          <div><label class="lbl">Evidencia o referencia</label><input type="text" id="f-ref" placeholder="EVD-, TR-, SOL-…"></div>
+        </div>
+        <div class="small muted" id="cnt" style="margin-bottom:8px"></div>
+        <div class="table-wrap"><table class="tbl">
+          <thead><tr><th>#</th><th>Fecha y hora</th><th>Usuario</th><th>Acción</th><th>Referencia</th><th>Detalle</th><th>IP</th><th>Hash</th></tr></thead>
+          <tbody id="rows"></tbody></table></div>
+        <div class="btn-row no-print" style="margin-top:10px">
+          <button class="btn sm" id="btn-edit">Intentar editar un registro</button>
+          <button class="btn sm" id="btn-tamper">Simular manipulación externa (sin guardar)</button>
+        </div>
+      </div>`;
+
+    const filtrar = () => {
+      const f = $('#f-fecha').value, us = $('#f-usr').value, ac = $('#f-acc').value, inc = $('#f-inc').value, ref = $('#f-ref').value.trim().toLowerCase();
+      return db.bitacora.filter(b => {
+        if (f) { const d = new Date(b.fecha); const loc = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; if (loc !== f) return false; }
+        if (us && b.usuario !== us) return false;
+        if (ac && b.accion !== ac) return false;
+        if (inc && b.id_incidente !== +inc) return false;
+        if (ref) { const ev = b.id_evidencia ? db.evidencias.find(e => e.id === b.id_evidencia).codigo : ''; if (!(b.referencia + ' ' + ev + ' ' + b.detalle).toLowerCase().includes(ref)) return false; }
+        return true;
+      });
+    };
+    const draw = () => {
+      const t0 = performance.now(), r = filtrar();
+      $('#rows').innerHTML = r.slice().reverse().map(b => `<tr><td>${b.id}</td><td class="small">${fmt(b.fecha)}</td><td>${esc(b.usuario)}<div class="small muted">${esc(b.rol)}</div></td>
+        <td><b>${esc(b.accion)}</b></td><td class="small">${esc(b.referencia)}</td><td class="small">${esc(b.detalle)}</td><td class="small">${esc(b.ip)}</td>
+        <td><code class="small" title="${esc(b.hash)}">${b.hash.slice(0, 10)}…</code></td></tr>`).join('') || '<tr><td colspan="8" class="empty">No hay registros con estos filtros.</td></tr>';
+      $('#cnt').textContent = `${r.length} de ${db.bitacora.length} registros`;
+    };
+    $$('#filtros input, #filtros select').forEach(x => x.addEventListener('input', draw));
+    draw();
+
+    const mostrar = (res, extra) => {
+      $('#verif').innerHTML = res.ok
+        ? `<div class="alert ok"><b>✓ Cadena íntegra</b>Se recalcularon ${res.total} hashes encadenados (SHA-256) y todos coinciden. ${extra || ''}</div>`
+        : `<div class="alert error"><b>✕ Cadena rota en el registro #${res.posicion}</b>El contenido del registro fue modificado fuera de la aplicación o la secuencia no coincide. ${extra || ''}</div>`;
+    };
+    $('#btn-verif').onclick = () => mostrar(S.verificarBitacora());
+    $('#btn-edit').onclick = () => {
+      S.log('Modificación rechazada', 'BITACORA_AUDITORIA', 'Registro #1', 'Intento de editar la bitácora desde la aplicación');
+      S.save();
+      UI.flash('La bitácora es de solo lectura. El intento quedó registrado.', 'error');
+      location.reload();
+    };
+    $('#btn-tamper').onclick = () => {
+      const copia = JSON.parse(JSON.stringify(db.bitacora));
+      const i = Math.min(2, copia.length - 1);
+      copia[i].detalle = copia[i].detalle + ' [texto alterado]';
+      mostrar(S.verificarBitacora(copia), `Se alteró en memoria el registro #${i + 1}; los datos guardados no cambiaron.`);
+    };
+    $('#btn-csv').onclick = () => {
+      const q = (v) => '"' + String(v).replace(/"/g, '""') + '"';
+      const csv = ['id,fecha,usuario,rol,accion,entidad,referencia,detalle,ip,hash_prev,hash']
+        .concat(filtrar().map(b => [b.id, b.fecha, b.usuario, b.rol, b.accion, b.entidad, b.referencia, b.detalle, b.ip, b.hash_prev, b.hash].map(q).join(','))).join('\n');
+      UI.descargar('bitacora_auditoria.csv', '﻿' + csv, 'text/csv');
+      S.log('Exportó bitácora', 'BITACORA_AUDITORIA', 'CSV', `${filtrar().length} registros`); S.save();
+    };
+  }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Transferencia · CUSTODIA</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="icon" href="favicon.svg">
+  <script src="js/sha256.js"></script>
+  <script src="js/qr.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/ui.js"></script>
+</head>
+<body>
+<script>
+UI.page({
+  active: 'custodia.html', perms: ['CUS_VER', 'CUS_GESTIONAR', 'TRF_AUTORIZAR'], modulo: 'Transferencia',
+  render(app, u) {
+    const S = Store, db = S.db, { esc, fmt, badge, header, footer, opts, $, lockedBtn } = UI;
+    const tr = db.transferencias.find(t => t.id === +UI.param('id'));
+    if (!tr) return UI.notFound(app, 'Transferencia');
+    const ev = db.evidencias.find(e => e.id === tr.id_evidencia);
+    const inicial = tr.tipo === 'Entrega inicial';
+    const soyReceptor = tr.id_recibe === u.id;
+    const puedeAutorizar = S.can('TRF_AUTORIZAR') && tr.estado === 'Pendiente de autorización';
+    const puedeRecibir = soyReceptor && S.can('CUS_GESTIONAR') && (tr.estado === 'Pendiente de recepción' || tr.estado === 'Pendiente de autorización');
+
+    const titulo = puedeAutorizar ? 'Revisar transferencia' : puedeRecibir ? 'Confirmar recepción' : 'Detalle de transferencia';
+    app.innerHTML = header('Transferencia de custodia', titulo, `${esc(tr.codigo)} · <a href="evidencia.html?id=${ev.id}">${esc(ev.codigo)}</a> · ${esc(ev.descripcion)}`) + `
+      <div class="card">
+        <div class="card-head"><h2>${esc(tr.tipo)}</h2>${badge(tr.estado)}</div>
+        <div class="fields">
+          <div class="field"><div class="k">Entrega</div><div class="v">${esc(S.userName(tr.id_entrega))}</div></div>
+          <div class="field"><div class="k">Recibe</div><div class="v">${esc(S.userName(tr.id_recibe))} · ${esc(S.rolDe(S.userById(tr.id_recibe)).nombre)}</div></div>
+          <div class="field"><div class="k">Ubicación de origen</div><div class="v">${esc(S.ubicName(tr.id_ubicacion_origen))}</div></div>
+          <div class="field"><div class="k">Ubicación de destino</div><div class="v">${tr.id_ubicacion_destino ? esc(S.ubicName(tr.id_ubicacion_destino)) : 'La asigna el custodio al recibir'}</div></div>
+          <div class="field"><div class="k">Motivo</div><div class="v normal">${esc(tr.motivo)}</div></div>
+          <div class="field"><div class="k">Fecha de solicitud</div><div class="v normal">${fmt(tr.fecha_solicitud)}</div></div>
+          ${!inicial ? `<div class="field"><div class="k">Autorización</div><div class="v normal">${tr.id_autoriza ? `${esc(S.userName(tr.id_autoriza))} · ${fmt(tr.fecha_autorizacion)}` : 'Pendiente del supervisor'}</div></div>` : `<div class="field"><div class="k">Autorización</div><div class="v normal">No requerida: entrega inicial del recolector al custodio</div></div>`}
+          <div class="field"><div class="k">Recepción</div><div class="v normal">${tr.estado === 'Completada' ? `${esc(tr.firma_nombre || S.userName(tr.id_recibe))} · ${fmt(tr.fecha_recepcion)}` : tr.estado === 'Con inconsistencia' ? 'Rechazada por inconsistencia · ' + fmt(tr.fecha_recepcion) : 'Pendiente'}</div></div>
+        </div>
+        ${tr.observacion ? `<p class="note"><b>Observación:</b> ${esc(tr.observacion)}</p>` : ''}
+        ${tr.firma ? `<div style="margin-top:16px"><div class="small muted">Firma de recepción</div><img src="${tr.firma}" alt="Firma" style="max-width:300px;border:1px solid var(--border);border-radius:6px;background:#fff"></div>` : ''}
+      </div>
+      <div id="accion"></div>
+      `;
+
+    const acc = $('#accion');
+    if (puedeAutorizar) {
+      acc.innerHTML = `<div class="card"><h2>Decisión del supervisor</h2>
+        <label class="lbl">Observación</label><textarea id="obs" placeholder="Ej. Verificar sello y datos al recibir."></textarea>
+        <div class="form-actions"><button class="btn primary" id="ok">Autorizar transferencia</button><button class="btn danger" id="no">Rechazar</button></div></div>`;
+      $('#ok').onclick = () => { if (UI.intentar(() => S.decidirTraslado(tr.id, true, $('#obs').value))) UI.go(location.href, 'Transferencia autorizada. El receptor ya puede confirmar.', 'ok'); };
+      $('#no').onclick = () => { if (UI.intentar(() => S.decidirTraslado(tr.id, false, $('#obs').value))) UI.go(location.href, 'Transferencia rechazada.', 'warn'); };
+    } else if (puedeRecibir) {
+      const espera = tr.estado === 'Pendiente de autorización';
+      acc.innerHTML = `<div class="card"><h2>Recepción por ${esc(S.nombre(u))}</h2>
+        ${espera ? '<div class="alert warn"><b>Esperando autorización</b>La recepción solo puede confirmarse después de que el supervisor autorice el traslado.</div>' : !inicial ? `<p class="muted small">Autorizada por ${esc(S.userName(tr.id_autoriza))}.</p>` : ''}
+        <label class="check"><input type="checkbox" id="c1"> El código y la descripción coinciden con la evidencia recibida (${esc(ev.codigo)}).</label>
+        <label class="check"><input type="checkbox" id="c2"> Sello y embalaje revisados sin inconsistencias.</label>
+        ${inicial ? `<div style="margin:14px 0;max-width:420px"><label class="lbl">Ubicación de almacenamiento <span class="req">*</span></label><select id="ubi">${opts(db.ubicaciones.filter(x => x.estado && x.id !== 1), '', x => x.nombre, x => x.id, 'Seleccione…')}</select></div>` : ''}
+        <div style="margin-top:14px"><div class="lbl">Firma de recepción</div><canvas class="signature" id="sig"></canvas>
+          <button class="btn sm" id="clr" style="margin-top:6px" type="button">Limpiar firma</button></div>
+        <div class="form-actions"><button class="btn primary" id="ok">Confirmar recepción y firmar</button><button class="btn danger" id="inc">Reportar inconsistencia</button></div></div>`;
+      const pad = UI.signaturePad($('#sig'));
+      $('#clr').onclick = () => pad.clear();
+      $('#ok').onclick = () => {
+        const ok = UI.intentar(() => S.confirmarRecepcion(tr.id, { codigoOk: $('#c1').checked, embalajeOk: $('#c2').checked, firma: pad.value(), id_ubicacion: $('#ubi') ? $('#ubi').value : null }));
+        if (ok) UI.go('evidencia.html?id=' + ev.id, `Recepción confirmada. Ahora eres responsable de ${ev.codigo}.`, 'ok');
+      };
+      $('#inc').onclick = async () => {
+        const det = await UI.pedirTexto('Reportar inconsistencia', 'La evidencia no se aceptará como recibida y se generará una alerta para el supervisor.', 'Inconsistencia encontrada', 'Reportar', true);
+        if (det === null) return;
+        const al = UI.intentar(() => S.reportarInconsistencia(tr.id, det));
+        if (al) UI.go(location.href, `Inconsistencia registrada. Se generó la alerta ${al.codigo}.`, 'warn');
+      };
+    } else if (tr.estado === 'Pendiente de autorización' || tr.estado === 'Pendiente de recepción') {
+      acc.innerHTML = `<div class="card"><h2>Acciones</h2><div class="btn-row">
+        ${tr.estado === 'Pendiente de autorización' ? lockedBtn('Autorizar transferencia', 'solo el supervisor autoriza transferencias.') : ''}
+        ${lockedBtn('Confirmar recepción', 'Solo el receptor designado (' + S.userName(tr.id_recibe) + ') puede confirmar, y únicamente con autorización.')}
+        </div></div>`;
+    }
+  }
+});
+</script>
+</body>
+</html>

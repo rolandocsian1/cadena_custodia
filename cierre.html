@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cierre del caso · CUSTODIA</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="icon" href="favicon.svg">
+  <script src="js/sha256.js"></script>
+  <script src="js/qr.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/ui.js"></script>
+</head>
+<body>
+<script>
+UI.page({
+  active: 'cierre.html', perms: ['CAS_CERRAR'], modulo: 'Cierre de casos',
+  render(app, u) {
+    const S = Store, db = S.db, { esc, fmt, badge, header, footer, opts, $ } = UI;
+    const idInc = +(UI.param('inc') || (db.incidentes.find(i => i.estado !== 'Archivado') || db.incidentes[0]).id);
+    const inc = db.incidentes.find(i => i.id === idInc);
+    if (!inc) return UI.notFound(app, 'Incidente');
+    const checks = S.checksCierre(inc.id);
+    const bloq = checks.filter(c => !c.ok && !c.aviso);
+    const cerrado = inc.estado === 'Cerrado', archivado = inc.estado === 'Archivado';
+    const listo = !bloq.length && !cerrado && !archivado;
+
+    app.innerHTML = header('Informes y cierre', cerrado || archivado ? 'Caso ' + inc.estado.toLowerCase() : listo ? 'Autorizar cierre del caso' : 'Revisión para cierre',
+      `${esc(inc.codigo)} · ${esc(inc.descripcion)}`) + `
+      <div class="card no-print"><label class="lbl">Caso</label>
+        <select id="sel" style="max-width:600px">${opts(db.incidentes, inc.id, i => `${i.codigo} · ${i.descripcion} (${i.estado})`, i => i.id)}</select></div>
+      <div class="card">
+        <div class="card-head"><h2>Comprobaciones del caso</h2>${badge(inc.estado)}</div>
+        ${checks.map(c => `<div class="check-row"><div><b>${esc(c.nombre)}</b>${c.detalle.length ? `<ul>${c.detalle.map(d => `<li>${esc(d)}</li>`).join('')}</ul>` : ''}</div>
+          ${c.ok ? badge('Cumple', 'green') : c.aviso ? badge('Advertencia', 'yellow') : badge('Pendiente', 'red')}</div>`).join('')}
+      </div>
+      ${cerrado || archivado ? `<div class="alert ok"><b>Cierre autorizado por ${esc(S.userName(inc.id_supervisor_cierre))} · ${fmt(inc.fecha_cierre)}</b>${inc.comentario_cierre ? esc(inc.comentario_cierre) + '. ' : ''}${archivado ? `Archivado el ${fmt(inc.fecha_archivo)}. ` : ''}El archivo conserva evidencias, accesos e historial.</div>`
+        : bloq.length ? `<div class="alert error"><b>Cierre bloqueado</b>Resuelve: ${esc(bloq.map(b => b.nombre.toLowerCase()).join('; '))}.</div>`
+        : `<div class="alert ok"><b>Listo para autorización del supervisor</b>El cierre queda auditado. El archivo conserva evidencias, accesos e historial.</div>`}
+      <div class="card">
+        ${!cerrado && !archivado ? '<label class="lbl">Comentario de cierre</label><textarea id="com" placeholder="Ej. Investigación concluida; hallazgos documentados en el informe."></textarea>' : ''}
+        <div class="form-actions">
+          ${!cerrado && !archivado ? `<button class="btn primary" id="cerrar" ${listo ? '' : 'title="Se intentará el cierre y el sistema mostrará el bloqueo"'}>Autorizar cierre</button>` : ''}
+          <button class="btn" id="archivar" ${cerrado ? '' : 'disabled title="Disponible después del cierre"'}>${cerrado ? 'Archivar caso' : archivado ? 'Caso archivado' : 'Archivar después del cierre'}</button>
+          <a class="btn" href="informe.html?inc=${inc.id}">Ver informe</a>
+        </div>
+      </div>`;
+
+    $('#sel').addEventListener('change', (e) => { location.href = 'cierre.html?inc=' + e.target.value; });
+    const bc = $('#cerrar');
+    if (bc) bc.onclick = async () => {
+      if (listo && !await UI.confirmar('Autorizar cierre', `Se cerrará el caso ${esc(inc.codigo)}. Esta acción queda registrada en la bitácora.`, 'Autorizar cierre')) return;
+      if (UI.intentar(() => S.cerrarCaso(inc.id, $('#com').value))) UI.go(location.href, `Caso ${inc.codigo} cerrado.`, 'ok');
+      else setTimeout(() => location.reload(), 2500);
+    };
+    $('#archivar').onclick = async () => {
+      if (!cerrado) return;
+      if (await UI.confirmar('Archivar caso', 'Las evidencias pasarán a estado Archivada. Ninguna información se elimina.', 'Archivar'))
+        if (UI.intentar(() => S.archivarCaso(inc.id))) UI.go(location.href, `Caso ${inc.codigo} archivado.`, 'ok');
+    };
+  }
+});
+</script>
+</body>
+</html>

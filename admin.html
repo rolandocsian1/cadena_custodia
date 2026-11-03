@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Administración · CUSTODIA</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="icon" href="favicon.svg">
+  <script src="js/sha256.js"></script>
+  <script src="js/qr.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/ui.js"></script>
+</head>
+<body>
+<script>
+UI.page({
+  active: 'admin.html', perms: ['ADM_GESTIONAR'], modulo: 'Administración',
+  render(app, u) {
+    const S = Store, db = S.db, { esc, fmt, badge, header, footer, opts, $, $$ } = UI;
+    let tab = UI.param('tab') || 'usuarios';
+
+    app.innerHTML = header('Administración', 'Administrar usuarios', '') + `
+      <div class="card">
+        <div class="tabs" id="tabs">
+          <button data-t="usuarios">Usuarios</button><button data-t="permisos">Roles y permisos</button>
+          <button data-t="tipos">Tipos de evidencia</button><button data-t="ubicaciones">Ubicaciones</button>
+        </div>
+        <div id="panel"></div>
+      </div>`;
+
+    const draw = () => {
+      $$('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.t === tab));
+      history.replaceState(null, '', 'admin.html?tab=' + tab);
+      const p = $('#panel');
+      if (tab === 'usuarios') {
+        p.innerHTML = `<div class="card-head"><h2 style="margin:0">Usuarios y permisos</h2><button class="btn primary" id="nuevo">+ Nuevo usuario</button></div>
+          <div class="table-wrap"><table class="tbl"><thead><tr><th>Usuario</th><th>Correo</th><th>Rol</th><th>Último acceso</th><th>Estado</th><th></th></tr></thead>
+          <tbody>${db.usuarios.map(x => `<tr><td><b>${esc(S.nombre(x))}</b></td><td class="small">${esc(x.correo)}</td><td>${esc(S.rolDe(x).nombre)}</td>
+            <td class="small">${fmt(x.ultimo_acceso)}</td><td>${badge(x.estado)}</td>
+            <td><div class="btn-row"><button class="btn sm" data-edit="${x.id}">Editar</button>
+              ${x.estado === 'Activo' ? `<button class="btn sm danger" data-est="${x.id}" data-v="Inactivo">Desactivar</button>` : `<button class="btn sm" data-est="${x.id}" data-v="Activo">Activar</button>`}</div></td></tr>`).join('')}</tbody></table></div>`;
+        $('#nuevo').onclick = () => formUsuario();
+        $$('[data-edit]').forEach(b => b.onclick = () => formUsuario(S.userById(+b.dataset.edit)));
+        $$('[data-est]').forEach(b => b.onclick = () => { if (UI.intentar(() => S.cambiarEstadoUsuario(+b.dataset.est, b.dataset.v), b.dataset.v === 'Activo' ? 'Usuario activado.' : 'Usuario desactivado; ya no puede iniciar sesión.')) draw(); });
+      }
+      if (tab === 'permisos') {
+        p.innerHTML = `<div class="table-wrap"><table class="tbl"><thead><tr><th>Permiso</th>${S.ROLES.map(r => `<th style="text-align:center">${esc(r.nombre)}</th>`).join('')}</tr></thead>
+          <tbody>${S.PERMISOS.map(pm => `<tr><td><b>${esc(pm.nombre)}</b></td>
+            ${S.ROLES.map(r => { const on = db.rol_permiso.some(x => x.id_rol === r.id_rol && x.codigo === pm.codigo), e = S.permisoEditable(r.id_rol, pm.codigo);
+              return `<td style="text-align:center">${e.editable ? `<input type="checkbox" data-rol="${r.id_rol}" data-p="${pm.codigo}" ${on ? 'checked' : ''}>` : `<input type="checkbox" disabled title="${esc(e.motivo)}" ${on ? 'checked' : ''}>`}</td>`; }).join('')}</tr>`).join('')}</tbody></table></div>`;
+        $$('[data-rol]').forEach(c => c.onchange = () => { if (!UI.intentar(() => S.setPermiso(+c.dataset.rol, c.dataset.p, c.checked), 'Permiso actualizado.')) c.checked = !c.checked; });
+      }
+      if (tab === 'tipos' || tab === 'ubicaciones') {
+        const tabla = tab, lista = db[tabla];
+        p.innerHTML = `<form class="form-grid" id="fc" style="grid-template-columns:1fr 2fr ${tabla === 'tipos' ? '1fr' : ''} auto;align-items:end;margin-bottom:16px">
+            <div><label class="lbl">Nombre <span class="req">*</span></label><input type="text" name="nombre"></div>
+            <div><label class="lbl">Descripción</label><input type="text" name="descripcion"></div>
+            ${tabla === 'tipos' ? `<div><label class="lbl">Categoría</label><select name="categoria">${opts([['digital', 'Digital'], ['dispositivo', 'Dispositivo físico'], ['documento', 'Documento físico']], 'digital', x => x[1], x => x[0])}</select></div>` : ''}
+            <div><button class="btn primary" type="submit">Agregar</button></div></form>
+          <div class="table-wrap"><table class="tbl"><thead><tr><th>Nombre</th><th>Descripción</th>${tabla === 'tipos' ? '<th>Categoría</th>' : ''}<th>Estado</th><th></th></tr></thead>
+          <tbody>${lista.map(x => `<tr><td><b>${esc(x.nombre)}</b></td><td class="small">${esc(x.descripcion || '')}</td>${tabla === 'tipos' ? `<td>${esc(x.categoria)}</td>` : ''}
+            <td>${badge(x.estado ? 'Activo' : 'Inactivo')}</td><td><button class="btn sm" data-tg="${x.id}">${x.estado ? 'Desactivar' : 'Activar'}</button></td></tr>`).join('')}</tbody></table></div>`;
+        $('#fc').onsubmit = (e) => { e.preventDefault(); if (UI.intentar(() => S.guardarCatalogo(tabla, UI.formData(e.target)), 'Registro agregado.')) draw(); };
+        $$('[data-tg]').forEach(b => b.onclick = () => { if (UI.intentar(() => S.toggleCatalogo(tabla, +b.dataset.tg))) draw(); });
+      }
+    };
+
+    const formUsuario = (x) => {
+      UI.modal(`<h2>${x ? 'Editar usuario' : 'Nuevo usuario'}</h2>
+        <form id="fu" novalidate><div class="form-grid">
+          <div><label class="lbl">Nombres <span class="req">*</span></label><input type="text" name="nombres" value="${esc(x ? x.nombres : '')}"></div>
+          <div><label class="lbl">Apellidos <span class="req">*</span></label><input type="text" name="apellidos" value="${esc(x ? x.apellidos : '')}"></div>
+          <div class="full"><label class="lbl">Correo <span class="req">*</span></label><input type="email" name="correo" value="${esc(x ? x.correo : '')}"></div>
+          <div class="full"><label class="lbl">Rol <span class="req">*</span></label><select name="id_rol">${opts(S.ROLES, x ? x.id_rol : '', r => r.nombre, r => r.id_rol, 'Seleccione…')}</select></div>
+          <div class="full"><label class="lbl">${x ? 'Nueva contraseña (opcional)' : 'Contraseña temporal *'}</label><input type="password" name="clave" placeholder="Mínimo 8 caracteres" autocomplete="new-password"></div>
+        </div>
+        <div class="form-actions"><button class="btn" type="button" data-close>Cancelar</button><button class="btn primary" type="submit">Guardar</button></div></form>`,
+      (m, close) => {
+        $('#fu', m).onsubmit = (e) => {
+          e.preventDefault();
+          const d = UI.formData(e.target);
+          if (x) d.id = x.id;
+          if (UI.intentar(() => S.guardarUsuario(d), x ? 'Usuario actualizado.' : 'Usuario creado.')) { close(); draw(); }
+        };
+      });
+    };
+
+    $$('#tabs button').forEach(b => b.onclick = () => { tab = b.dataset.t; draw(); });
+    draw();
+  }
+});
+</script>
+</body>
+</html>

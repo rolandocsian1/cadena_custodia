@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Detalle de incidente · CUSTODIA</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="icon" href="favicon.svg">
+  <script src="js/sha256.js"></script>
+  <script src="js/qr.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/ui.js"></script>
+</head>
+<body>
+<script>
+UI.page({
+  active: 'incidentes.html', perms: ['INC_VER', 'INC_CREAR'], modulo: 'Detalle de incidente',
+  render(app, u) {
+    const S = Store, db = S.db, { esc, fmt, badge, sem, header, footer } = UI;
+    const inc = S.incidentesVisibles(u).find(i => i.id === +UI.param('id'));
+    if (!inc) return UI.notFound(app, 'Incidente');
+    const evs = db.evidencias.filter(e => e.id_incidente === inc.id);
+    const verEv = S.can('EVD_VER') || S.can('EVD_CREAR');
+    const abierto = inc.estado === 'Abierto' || inc.estado === 'En investigación';
+    const acciones = [
+      S.can('EVD_CREAR') && abierto ? `<a class="btn primary" href="evidencia-nueva.html?inc=${inc.id}">+ Registrar evidencia</a>` : '',
+      S.can('SEG_VER') ? `<a class="btn" href="seguimiento.html?inc=${inc.id}">Línea de tiempo</a>` : '',
+      S.can('INF_GENERAR') ? `<a class="btn" href="informe.html?inc=${inc.id}">Informe</a>` : '',
+      S.can('CAS_CERRAR') ? `<a class="btn" href="cierre.html?inc=${inc.id}">Cierre</a>` : ''
+    ].join('');
+
+    app.innerHTML = header('Detalle de incidente', inc.codigo, esc(inc.descripcion), acciones) + `
+      <div class="card">
+        <div class="card-head"><h2>Información del incidente</h2><div class="btn-row">${badge(inc.estado)} ${badge('Prioridad ' + inc.prioridad, UI.COLORS[inc.prioridad])}</div></div>
+        <div class="fields three">
+          <div class="field"><div class="k">Tipo</div><div class="v">${esc(inc.tipo)}</div></div>
+          <div class="field"><div class="k">Fecha del incidente</div><div class="v">${fmt(inc.fecha_incidente)}</div></div>
+          <div class="field"><div class="k">Lugar</div><div class="v">${esc(inc.ubicacion)}</div></div>
+          <div class="field"><div class="k">Reportante</div><div class="v">${esc(S.userName(inc.id_reportante))}</div></div>
+          <div class="field"><div class="k">Fecha de registro</div><div class="v">${fmt(inc.fecha_registro)}</div></div>
+          <div class="field"><div class="k">Cierre</div><div class="v">${inc.fecha_cierre ? fmt(inc.fecha_cierre) + ' · ' + esc(S.userName(inc.id_supervisor_cierre)) : '—'}</div></div>
+        </div>
+        ${inc.detalle ? `<p class="note"><b>Detalle:</b> ${esc(inc.detalle)}</p>` : ''}
+      </div>
+      ${verEv ? `<div class="card">
+        <div class="card-head"><h2>Evidencias del caso (${evs.length})</h2></div>
+        <div class="table-wrap"><table class="tbl">
+          <thead><tr><th>Código</th><th>Tipo</th><th>Descripción</th><th>Responsable</th><th>Ubicación</th><th>Semáforo</th></tr></thead>
+          <tbody>${evs.map(e => `<tr class="clickable" onclick="location.href='evidencia.html?id=${e.id}'">
+            <td><b>${esc(e.codigo)}</b></td><td>${esc(S.tipoDe(e).nombre)}</td><td>${esc(e.descripcion)}</td>
+            <td>${esc(S.userName(e.id_responsable))}</td><td>${esc(S.ubicName(e.id_ubicacion))}</td><td>${sem(e)}</td></tr>`).join('')
+            || '<tr><td colspan="6" class="empty">Aún no se registran evidencias para este incidente.</td></tr>'}</tbody>
+        </table></div></div>` : `<div class="alert info"><b>Seguimiento del reporte</b>Tu rol permite consultar el estado del incidente; las evidencias las administra el equipo de custodia.</div>`}
+      `;
+  }
+});
+</script>
+</body>
+</html>

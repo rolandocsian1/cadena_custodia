@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Alertas · CUSTODIA</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="icon" href="favicon.svg">
+  <script src="js/sha256.js"></script>
+  <script src="js/qr.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/ui.js"></script>
+</head>
+<body>
+<script>
+UI.page({
+  active: 'alertas.html', perms: ['ALE_VER', 'ALE_RESOLVER'], modulo: 'Alertas',
+  render(app, u) {
+    const S = Store, db = S.db, { esc, fmt, badge, header, footer, opts, $ } = UI;
+    app.innerHTML = header('Alertas de integridad y seguridad', 'Alertas', '') + `
+      <div class="card">
+        <div class="form-grid" style="grid-template-columns:repeat(2,minmax(0,240px));margin-bottom:14px">
+          <div><label class="lbl">Estado</label><select id="f-est">${opts(['Pendiente', 'En revisión', 'Resuelta'], '', null, null, 'Todos')}</select></div>
+          <div><label class="lbl">Tipo</label><select id="f-tipo">${opts(['Integridad', 'Seguridad', 'Recepción'], '', null, null, 'Todos')}</select></div>
+        </div>
+        <div class="table-wrap"><table class="tbl">
+          <thead><tr><th>Código</th><th>Tipo</th><th>Evidencia</th><th>Descripción</th><th>Generada</th><th>Estado</th><th></th></tr></thead>
+          <tbody id="rows"></tbody></table></div>
+      </div>`;
+    const draw = () => {
+      const e = $('#f-est').value, t = $('#f-tipo').value;
+      $('#rows').innerHTML = db.alertas.slice().reverse().filter(a => (!e || a.estado === e) && (!t || a.tipo === t)).map(a => {
+        const ev = db.evidencias.find(x => x.id === a.id_evidencia);
+        return `<tr class="clickable" onclick="location.href='alerta.html?id=${a.id}'"><td><b>${esc(a.codigo)}</b></td><td>${badge(a.tipo, a.tipo === 'Integridad' ? 'red' : a.tipo === 'Seguridad' ? 'yellow' : 'blue')}</td>
+          <td>${esc(ev.codigo)}</td><td class="small">${esc(a.descripcion)}</td><td class="small">${fmt(a.fecha_generacion)}</td><td>${badge(a.estado)}</td>
+          <td><a class="btn sm ${a.estado !== 'Resuelta' && S.can('ALE_RESOLVER') ? 'primary' : ''}" href="alerta.html?id=${a.id}">${a.estado !== 'Resuelta' && S.can('ALE_RESOLVER') ? 'Revisar' : 'Ver'}</a></td></tr>`;
+      }).join('') || '<tr><td colspan="7" class="empty">No hay alertas con estos criterios.</td></tr>';
+    };
+    $('#f-est').addEventListener('input', draw); $('#f-tipo').addEventListener('input', draw);
+    draw();
+  }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Solicitar acceso · CUSTODIA</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="icon" href="favicon.svg">
+  <script src="js/sha256.js"></script>
+  <script src="js/qr.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/ui.js"></script>
+</head>
+<body>
+<script>
+UI.page({
+  active: 'solicitudes.html', perms: ['ACC_SOLICITAR'], modulo: 'Solicitar acceso',
+  render(app, u) {
+    const S = Store, db = S.db, { esc, fmt, header, footer, opts, $, toLocalInput } = UI;
+    const evs = db.evidencias.filter(e => e.estado !== 'Archivada' && S.archivosDe(e.id).length);
+    const ahora = new Date(), fin = new Date(Date.now() + 3 * 3600000);
+    app.innerHTML = header('Solicitudes de acceso', 'Solicitar acceso', '') + `
+      <form class="card" id="f" novalidate>
+        <h2>Nueva solicitud</h2>
+        <div class="form-grid">
+          <div><label class="lbl">Evidencia <span class="req">*</span></label><select name="ev">${opts(evs, UI.param('ev') || '', e => `${e.codigo} · ${e.descripcion}`, e => e.id, 'Seleccione…')}</select></div>
+          <div><label class="lbl">Solicitante (automático)</label><input type="text" readonly value="${esc(S.nombre(u))}"></div>
+          <div class="full"><label class="lbl">Motivo <span class="req">*</span></label><textarea name="motivo" placeholder="Ej. Examinar archivos de una copia autorizada."></textarea></div>
+          <div><label class="lbl">Inicio solicitado <span class="req">*</span></label><input type="datetime-local" name="inicio" value="${toLocalInput(ahora)}"></div>
+          <div><label class="lbl">Fin solicitado <span class="req">*</span></label><input type="datetime-local" name="fin" value="${toLocalInput(fin)}"></div>
+          <div><label class="lbl">Fecha de solicitud (automática)</label><input type="text" readonly value="${fmt(ahora.toISOString())}"></div>
+        </div>
+        <div class="alert info" style="margin-top:20px"><b>Acceso sujeto a autorización</b>El envío no permite descargar ni analizar archivos hasta la aprobación del supervisor.</div>
+        <div class="form-actions"><button class="btn primary" type="submit">Enviar solicitud</button><a class="btn" href="solicitudes.html">Cancelar</a></div>
+      </form>`;
+    $('#f').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const d = UI.formData(e.target);
+      const s = UI.intentar(() => S.solicitarAcceso(d.ev, d.motivo, d.inicio, d.fin));
+      if (s) UI.go('solicitudes.html', `Solicitud ${s.codigo} enviada al supervisor.`, 'ok');
+    });
+  }
+});
+</script>
+</body>
+</html>

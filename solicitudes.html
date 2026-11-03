@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Solicitudes de acceso · CUSTODIA</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="icon" href="favicon.svg">
+  <script src="js/sha256.js"></script>
+  <script src="js/qr.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/ui.js"></script>
+</head>
+<body>
+<script>
+UI.page({
+  active: 'solicitudes.html', perms: ['ACC_SOLICITAR', 'ACC_AUTORIZAR', 'AUD_CONSULTAR'], modulo: 'Solicitudes de acceso',
+  render(app, u) {
+    const S = Store, db = S.db, { esc, fmt, badge, header, footer, opts, $ } = UI;
+    const soloMias = S.can('ACC_SOLICITAR') && !S.can('ACC_AUTORIZAR') && !S.can('AUD_CONSULTAR');
+    const lista = db.solicitudes.filter(s => !soloMias || s.id_solicitante === u.id).slice().reverse();
+    const estados = ['Pendiente', 'Programada', 'Vigente', 'Vencida', 'Finalizada', 'Rechazada'];
+
+    app.innerHTML = header('Solicitudes de acceso', 'Solicitudes de acceso',
+      '',
+      S.can('ACC_SOLICITAR') ? '<a class="btn primary" href="solicitud-nueva.html">+ Nueva solicitud</a>' : '') + `
+      <div class="card">
+        <div style="max-width:260px;margin-bottom:14px"><label class="lbl">Estado</label><select id="f-est">${opts(estados, UI.param('estado') || '', null, null, 'Todos')}</select></div>
+        <div class="table-wrap"><table class="tbl">
+          <thead><tr><th>Código</th><th>Evidencia</th><th>Solicitante</th><th>Motivo</th><th>Periodo</th><th>Estado</th><th></th></tr></thead>
+          <tbody id="rows"></tbody></table></div>
+      </div>`;
+    const draw = () => {
+      const f = $('#f-est').value;
+      $('#rows').innerHTML = lista.filter(s => !f || S.estadoAcceso(s) === f).map(s => {
+        const ev = db.evidencias.find(e => e.id === s.id_evidencia), st = S.estadoAcceso(s);
+        const btn = st === 'Pendiente' && S.can('ACC_AUTORIZAR') ? '<a class="btn sm primary" href="solicitud.html?id=' + s.id + '">Revisar</a>'
+          : st === 'Vigente' && s.id_solicitante === u.id ? '<a class="btn sm primary" href="analisis.html?sol=' + s.id + '">Analizar copia</a>'
+          : '<a class="btn sm" href="solicitud.html?id=' + s.id + '">Ver</a>';
+        return `<tr><td><b>${esc(s.codigo)}</b></td><td>${esc(ev.codigo)}<div class="small muted">${esc(ev.descripcion)}</div></td>
+          <td>${esc(S.userName(s.id_solicitante))}</td><td class="small">${esc(s.motivo)}</td>
+          <td class="small">${fmt(s.inicio)}<br>${fmt(s.fin)}</td><td>${badge(st)}</td><td>${btn}</td></tr>`;
+      }).join('') || '<tr><td colspan="7" class="empty">No hay solicitudes.</td></tr>';
+    };
+    $('#f-est').addEventListener('input', draw);
+    draw();
+  }
+});
+</script>
+</body>
+</html>

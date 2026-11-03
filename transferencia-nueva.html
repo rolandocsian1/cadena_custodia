@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Solicitar transferencia · CUSTODIA</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="icon" href="favicon.svg">
+  <script src="js/sha256.js"></script>
+  <script src="js/qr.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/ui.js"></script>
+</head>
+<body>
+<script>
+UI.page({
+  active: 'custodia.html', perms: ['CUS_GESTIONAR'], modulo: 'Solicitar transferencia',
+  render(app, u) {
+    const S = Store, db = S.db, { esc, fmt, header, footer, opts, $ } = UI;
+    const ev = db.evidencias.find(e => e.id === +UI.param('ev'));
+    if (!ev) return UI.notFound(app, 'Evidencia');
+    const tp = S.transferenciaPendiente(ev.id);
+    // Usuarios activos con permiso de custodia
+    const receptores = db.usuarios.filter(x => x.estado === 'Activo' && S.can('CUS_GESTIONAR', x));
+    const ubic = db.ubicaciones.filter(x => x.estado);
+
+    app.innerHTML = header('Transferencia de custodia', 'Solicitar transferencia',
+      `${esc(ev.codigo)} · ${esc(ev.descripcion)}`) + `
+      ${ev.id_responsable !== u.id ? `<div class="alert error"><b>No eres el responsable actual</b>Solo ${esc(S.userName(ev.id_responsable))} puede iniciar la transferencia de esta evidencia.</div>` : ''}
+      ${tp ? `<div class="alert error"><b>Transferencia ${esc(tp.codigo)} pendiente</b>No puede iniciarse una nueva transferencia mientras exista otra pendiente (${esc(tp.estado)}).</div>` : ''}
+      <form class="card" id="f" novalidate>
+        <h2>Entrega y destino</h2>
+        <div class="form-grid">
+          <div><label class="lbl">Entrega · sesión actual</label><input type="text" readonly value="${esc(S.nombre(u))}"></div>
+          <div><label class="lbl">Ubicación de origen</label><input type="text" readonly value="${esc(S.ubicName(ev.id_ubicacion))}"></div>
+          <div><label class="lbl">Recibe <span class="req">*</span></label><select name="recibe">${opts(receptores, '', x => `${S.nombre(x)} · ${S.rolDe(x).nombre}${x.id === u.id ? ' (tú)' : ''}`, x => x.id, 'Seleccione…')}</select></div>
+          <div><label class="lbl">Destino <span class="req">*</span></label><select name="destino">${opts(ubic, '', x => x.nombre, x => x.id, 'Seleccione…')}</select></div>
+          <div class="full"><label class="lbl">Motivo <span class="req">*</span></label><input type="text" name="motivo" placeholder="Ej. Reubicación de almacenamiento"></div>
+          <div><label class="lbl">Fecha de solicitud (automática)</label><input type="text" readonly value="${fmt(new Date().toISOString())}"></div>
+        </div>
+        <div class="alert warn" style="margin-top:20px"><b>Pendiente de autorización</b>No cambia el responsable hasta que el receptor confirme la recepción autorizada por el supervisor.</div>
+        <div class="form-actions"><button class="btn primary" type="submit">Enviar al supervisor</button><a class="btn" href="evidencia.html?id=${ev.id}">Cancelar</a></div>
+      </form>`;
+
+    $('#f').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const d = UI.formData(e.target);
+      const tr = UI.intentar(() => S.solicitarTraslado(ev.id, d.recibe, d.destino, d.motivo));
+      if (tr) UI.go('transferencia.html?id=' + tr.id, `Transferencia ${tr.codigo} enviada al supervisor.`, 'ok');
+    });
+  }
+});
+</script>
+</body>
+</html>

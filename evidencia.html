@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Detalle de evidencia · CUSTODIA</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="icon" href="favicon.svg">
+  <script src="js/sha256.js"></script>
+  <script src="js/qr.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/ui.js"></script>
+</head>
+<body>
+<script>
+UI.page({
+  active: 'evidencias.html', perms: ['EVD_VER', 'EVD_CREAR'], modulo: 'Detalle de evidencia',
+  render(app, u) {
+    const S = Store, db = S.db, { esc, fmt, fmtBytes, badge, sem, header, footer, opts, $, $$, shortHash, lockedBtn } = UI;
+    const ev = S.evidenciasVisibles(u).find(e => e.id === +UI.param('id'));
+    if (!ev) return UI.notFound(app, 'Evidencia');
+    const inc = S.incDe(ev), tipo = S.tipoDe(ev);
+    const originales = S.archivosDe(ev.id, false), copias = S.archivosDe(ev.id, true);
+    const integ = S.integridad(ev), semf = S.semaforo(ev);
+    const tp = S.transferenciaPendiente(ev.id);
+    const archivada = ev.estado === 'Archivada';
+    const esResp = ev.id_responsable === u.id;
+    const trs = db.transferencias.filter(t => t.id_evidencia === ev.id);
+
+    // Acciones de custodia según rol y reglas
+    const acc = [];
+    if (S.can('EVD_CREAR') && ev.estado === 'Registrada' && !tp)
+      acc.push(esResp ? '<button class="btn primary" id="btn-entregar">Entregar al custodio</button>' : lockedBtn('Entregar al custodio', 'Solo el responsable actual puede entregar la evidencia.'));
+    if (S.can('CUS_GESTIONAR') && !archivada && ev.estado !== 'Registrada')
+      acc.push(!esResp ? lockedBtn('Solicitar transferencia', 'Solo el custodio responsable puede iniciar la transferencia.')
+        : tp ? lockedBtn('Solicitar transferencia', `ya existe la transferencia ${tp.codigo} pendiente.`)
+        : `<a class="btn primary" href="transferencia-nueva.html?ev=${ev.id}">Solicitar transferencia</a>`);
+    if (S.can('ACC_SOLICITAR') && originales.length && !archivada) acc.push(`<a class="btn primary" href="solicitud-nueva.html?ev=${ev.id}">Solicitar acceso a copia</a>`);
+    if (ev.documento && !ev.documento.digitalizado && !archivada && (S.can('EVD_CREAR') || S.can('CUS_GESTIONAR'))) acc.push('<label class="btn"><input type="file" id="scan" class="hidden">Adjuntar documento escaneado</label>');
+    if (tp) acc.push(`<a class="btn" href="transferencia.html?id=${tp.id}">Ver ${esc(tp.codigo)}</a>`);
+    if (S.can('SEG_VER')) acc.push(`<a class="btn" href="seguimiento.html?ev=${ev.id}">Consultar historial</a>`);
+
+    const disp = ev.dispositivo, doc = ev.documento;
+    const nuevo = UI.param('nuevo');
+
+    app.innerHTML = header('Detalle de evidencia', 'Detalle de evidencia',
+      `${esc(ev.codigo)} · <a href="incidente.html?id=${inc.id}">${esc(inc.codigo)}</a> · ${esc(inc.descripcion)}`) + `
+      ${nuevo ? `<div class="alert ok"><b>Evidencia registrada: ${esc(ev.codigo)}</b>Imprime la etiqueta con el QR y entrégala al custodio.</div>` : ''}
+      ${tp ? `<div class="alert warn"><b>${esc(tp.tipo)} ${esc(tp.codigo)} · ${esc(tp.estado)}</b>${esc(S.userName(tp.id_entrega))} → ${esc(S.userName(tp.id_recibe))}.</div>` : ''}
+      <div class="card">
+        <div class="card-head"><h2>${esc(ev.descripcion)}</h2><span class="badge gray">${esc(tipo.nombre)}</span></div>
+        <div class="btn-row" style="margin-bottom:22px"><span class="badge ${integ.color}">${esc(integ.texto)}</span>
+          <span class="badge ${semf.color}"><span class="dot ${semf.color}"></span>${semf.color === 'red' ? 'Atención · ' : ''}${esc(semf.texto)}</span></div>
+        <div class="fields">
+          <div class="field"><div class="k">Responsable actual</div><div class="v">${esc(S.userName(ev.id_responsable))}</div></div>
+          <div class="field"><div class="k">Ubicación actual</div><div class="v">${esc(S.ubicName(ev.id_ubicacion))}</div></div>
+          <div class="field"><div class="k">Estado de custodia</div><div class="v">${esc(S.estadoEvidencia(ev))}</div></div>
+          <div class="field"><div class="k">Archivo de referencia</div><div class="v">${originales.length ? esc(originales[0].nombre) : (doc && !doc.digitalizado ? 'Pendiente de digitalización' : '—')}</div></div>
+          <div class="field"><div class="k">Origen</div><div class="v normal">${esc(ev.origen)}</div></div>
+          <div class="field"><div class="k">Lugar de recolección</div><div class="v normal">${esc(ev.lugar)}</div></div>
+          <div class="field"><div class="k">Medio de recolección</div><div class="v normal">${esc(ev.medio)}</div></div>
+          <div class="field"><div class="k">Recolector · fecha de recolección</div><div class="v normal">${esc(S.userName(ev.id_recolector))} · ${fmt(ev.fecha_recoleccion)}</div></div>
+        </div>
+        ${disp ? `<h3 style="margin-top:22px">Dispositivo físico</h3><div class="fields three">
+          <div class="field"><div class="k">Marca / modelo</div><div class="v normal">${esc(disp.marca)} / ${esc(disp.modelo)}</div></div>
+          <div class="field"><div class="k">Número de serie</div><div class="v normal">${esc(disp.serie || 'No disponible')}</div></div>
+          <div class="field"><div class="k">Encendido</div><div class="v normal">${esc(disp.encendido)}</div></div>
+          <div class="field"><div class="k">Estado físico</div><div class="v normal">${esc(disp.estado_fisico)}</div></div>
+          <div class="field"><div class="k">Embalaje</div><div class="v normal">${esc(disp.embalaje)}</div></div>
+          <div class="field"><div class="k">Accesorios</div><div class="v normal">${esc(disp.accesorios || 'Ninguno')}</div></div></div>` : ''}
+        ${doc ? `<h3 style="margin-top:22px">Documento físico</h3><div class="fields three">
+          <div class="field"><div class="k">Páginas</div><div class="v normal">${esc(doc.paginas)}</div></div>
+          <div class="field"><div class="k">Estado físico</div><div class="v normal">${esc(doc.estado_fisico)}</div></div>
+          <div class="field"><div class="k">Digitalización</div><div class="v normal">${doc.digitalizado ? badge('Digitalizado', 'green') : badge('Pendiente de digitalización', 'yellow') + `<div class="small muted" style="margin-top:4px">Motivo: ${esc(doc.motivo_pendiente)}</div>`}</div></div></div>` : ''}
+        ${ev.fotos && ev.fotos.length ? `<h3 style="margin-top:22px">Fotografías del estado inicial</h3><div class="thumbs">${ev.fotos.map((f, i) => `<img src="${f}" alt="Fotografía ${i + 1}">`).join('')}</div>` : ''}
+        ${ev.observaciones ? `<p class="note"><b>Observaciones:</b> ${esc(ev.observaciones)}</p>` : ''}
+        <div class="form-actions no-print">${acc.join('')}</div>
+      </div>
+
+      <div class="card">
+        <h2>Identificación y acceso</h2>
+        <div class="qr-box">
+          <div class="label-print" id="etiqueta">
+            ${QR.svg(ev.referencia_qr, 4)}
+            <div><div class="small muted">Evidencia</div><div class="code">${esc(ev.codigo)}</div>
+              <div class="small">Caso ${esc(inc.codigo)}</div><div class="small">Recolección: ${UI.fmtDate(ev.fecha_recoleccion)}</div>
+              <div class="small">Responsable: ${esc(S.userName(ev.id_recolector))}</div></div>
+          </div>
+          <div style="flex:1;min-width:240px">
+            <div class="field"><div class="k">Código</div><div class="v">${esc(ev.codigo)}</div></div>
+            <div class="field" style="margin-top:12px"><div class="k">Contenido del QR (referencia protegida)</div><div class="v normal"><code>${esc(ev.referencia_qr)}</code></div></div>
+            <div class="btn-row no-print" style="margin-top:12px"><button class="btn" id="btn-print">Imprimir etiqueta</button>
+              <a class="btn" href="qr.html?ref=${encodeURIComponent(ev.referencia_qr)}">Probar lectura del QR</a></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>Archivos e integridad</h2></div>
+        <div class="table-wrap"><table class="tbl">
+          <thead><tr><th>Archivo</th><th>Tamaño</th><th>Hash registrado</th><th>Última verificación</th><th class="no-print">Acciones</th></tr></thead>
+          <tbody>${originales.concat(copias).map(a => {
+            const v = S.ultimaVerificacion(a.id);
+            const orig = a.es_copia ? db.archivos.find(x => x.id === a.id_origen) : null;
+            return `<tr><td><b>${esc(a.nombre)}</b><div class="small muted">${esc(a.tipo_archivo)}${a.es_copia ? ` · copia de ${esc(orig.nombre)}` : ''}${a.es_escaneo ? ' · escaneo asociado' : ''}</div></td>
+              <td>${fmtBytes(a.tamano)}</td><td><code title="${esc(a.hash_original)}">${shortHash(a.hash_original)}</code></td>
+              <td>${v ? `${badge(v.coincide ? 'Coincidente' : 'No coincidente', v.coincide ? 'green' : 'red')}<div class="small muted">${fmt(v.fecha)} · ${esc(S.userName(v.id_usuario))}</div>` : '<span class="muted small">Sin verificar</span>'}</td>
+              <td class="no-print"><div class="btn-row">
+                ${!a.es_copia && S.can('INT_VERIFICAR') && !archivada ? `<button class="btn sm" data-verif="${a.id}">Verificar</button>` : ''}
+                ${!a.es_copia ? `<button class="btn sm" data-abrir="${a.id}">Abrir original</button>` : ''}
+                ${a.contenido_demo ? `<button class="btn sm" data-desc="${a.id}" title="Descarga el archivo ficticio para probar la verificación">Descargar prueba</button>` : ''}
+              </div></td></tr>`;
+          }).join('') || `<tr><td colspan="5" class="empty">${doc && !doc.digitalizado ? 'Documento pendiente de digitalización: aún no tiene archivo asociado.' : 'Esta evidencia no tiene archivos digitales asociados.'}</td></tr>`}</tbody>
+        </table></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>Movimientos de custodia</h2>${S.can('SEG_VER') ? `<a class="btn sm" href="seguimiento.html?ev=${ev.id}">Línea de tiempo completa</a>` : ''}</div>
+        <div class="table-wrap"><table class="tbl">
+          <thead><tr><th>Código</th><th>Tipo</th><th>Entrega → Recibe</th><th>Destino</th><th>Fecha</th><th>Estado</th></tr></thead>
+          <tbody>${trs.map(t => `<tr class="clickable" onclick="location.href='transferencia.html?id=${t.id}'"><td><b>${esc(t.codigo)}</b></td><td>${esc(t.tipo)}</td>
+            <td>${esc(S.userName(t.id_entrega))} → ${esc(S.userName(t.id_recibe))}</td><td>${esc(t.id_ubicacion_destino ? S.ubicName(t.id_ubicacion_destino) : 'Por asignar')}</td>
+            <td class="small">${fmt(t.fecha_recepcion || t.fecha_solicitud)}</td><td>${badge(t.estado)}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">Sin movimientos registrados.</td></tr>'}</tbody>
+        </table></div>
+      </div>
+      <div class="no-print" style="text-align:right"><button class="btn sm danger" id="btn-eliminar">Eliminar evidencia</button></div>
+      `;
+
+    const reload = () => location.reload();
+    $('#btn-print').onclick = () => {
+      const w = window.open('', '_blank', 'width=520,height=360');
+      w.document.write(`<html><head><title>Etiqueta ${esc(ev.codigo)}</title><link rel="stylesheet" href="css/styles.css"></head><body style="padding:20px;background:#fff">${$('#etiqueta').outerHTML}<script>setTimeout(()=>print(),300)<\/script></body></html>`);
+      w.document.close();
+    };
+    $$('[data-verif]').forEach(b => b.onclick = () => UI.dialogoVerificacion(db.archivos.find(a => a.id === +b.dataset.verif), () => {
+      document.querySelector('.modal-back [data-close]').addEventListener('click', reload);
+    }));
+    $$('[data-abrir]').forEach(b => b.onclick = () => {
+      const r = S.abrirOriginal(+b.dataset.abrir);
+      if (r.permitido) UI.toast('Consulta controlada registrada en la bitácora.', 'ok');
+      else { UI.flash(`Acceso denegado: solo el custodio responsable puede abrir el original. Se generó la alerta ${r.alerta.codigo}.`, 'error'); reload(); }
+    });
+    $$('[data-desc]').forEach(b => b.onclick = () => {
+      const a = db.archivos.find(x => x.id === +b.dataset.desc);
+      UI.descargar(a.nombre.replace(/^COP-\d{4}-\d{4}_/, ''), a.contenido_demo, 'text/plain');
+    });
+    $('#btn-eliminar').onclick = async () => {
+      if (await UI.confirmar('Eliminar evidencia', `Se intentará eliminar ${esc(ev.codigo)}.`, 'Eliminar', true)) UI.intentar(() => S.intentarEliminarEvidencia(ev.id));
+    };
+
+    const be = $('#btn-entregar');
+    if (be) be.onclick = () => {
+      const custodios = db.usuarios.filter(x => x.estado === 'Activo' && x.id !== u.id && S.can('CUS_GESTIONAR', x));
+      UI.modal(`<h2>Entregar al custodio</h2><p class="muted small">${esc(ev.codigo)}</p>
+        <label class="lbl">Custodio que recibe <span class="req">*</span></label><select id="m-cus">${opts(custodios, '', x => S.nombre(x), x => x.id, 'Seleccione…')}</select>
+        <div style="height:12px"></div><label class="lbl">Observación</label><input type="text" id="m-mot" value="Entrega al custodio después del registro">
+        <div class="form-actions"><button class="btn" data-close>Cancelar</button><button class="btn primary" id="m-ok">Registrar entrega</button></div>`,
+      (m, close) => {
+        $('#m-ok', m).onclick = () => {
+          if (!$('#m-cus', m).value) { $('#m-cus', m).classList.add('invalid'); return; }
+          const tr = UI.intentar(() => S.entregarACustodio(ev.id, +$('#m-cus', m).value, $('#m-mot', m).value));
+          if (tr) { close(); UI.go(location.href.replace(/&nuevo=1/, ''), `Entrega ${tr.codigo} registrada. Pendiente de confirmación del custodio.`, 'ok'); }
+        };
+      });
+    };
+    const sc = $('#scan');
+    if (sc) sc.addEventListener('change', async (e) => {
+      const r = await UI.hashFiles(e.target.files);
+      if (r[0] && UI.intentar(() => S.adjuntarEscaneo(ev.id, r[0]))) UI.go(location.href, 'Documento escaneado asociado al mismo registro de evidencia.', 'ok');
+    });
+  }
+});
+</script>
+</body>
+</html>

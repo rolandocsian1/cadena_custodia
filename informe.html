@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Informe de trazabilidad · CUSTODIA</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="icon" href="favicon.svg">
+  <script src="js/sha256.js"></script>
+  <script src="js/qr.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/ui.js"></script>
+</head>
+<body>
+<script>
+UI.page({
+  active: 'informe.html', perms: ['INF_GENERAR'], modulo: 'Informes de trazabilidad',
+  render(app, u) {
+    const S = Store, db = S.db, { esc, fmt, badge, header, footer, opts, $ } = UI;
+    const idInc = +(UI.param('inc') || (db.incidentes[0] && db.incidentes[0].id));
+    app.innerHTML = header('Informes', 'Informe de trazabilidad', '',
+      '<button class="btn" id="btn-gen">Generar informe</button><button class="btn primary" id="btn-pdf">Imprimir / Exportar PDF</button>') + `
+      <div class="card no-print"><label class="lbl">Caso</label><select id="sel" style="max-width:600px">${opts(db.incidentes, idInc, i => `${i.codigo} · ${i.descripcion} (${i.estado})`, i => i.id)}</select>
+        <p class="note" id="hist"></p></div>
+      <div class="card report" id="rep"></div>`;
+
+    const tabla = (cols, rows, vacio) => `<div class="table-wrap"><table class="tbl"><thead><tr>${cols.map(c => `<th>${c}</th>`).join('')}</tr></thead>
+      <tbody>${rows.length ? rows.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('') : `<tr><td colspan="${cols.length}" class="empty">${vacio}</td></tr>`}</tbody></table></div>`;
+
+    const draw = () => {
+      const inc = db.incidentes.find(i => i.id === +$('#sel').value);
+      const evs = db.evidencias.filter(e => e.id_incidente === inc.id);
+      const ids = evs.map(e => e.id);
+      const checks = S.checksCierre(inc.id).filter(c => !c.ok && !c.aviso);
+      const infs = db.informes.filter(i => i.id_incidente === inc.id);
+      $('#hist').textContent = infs.length ? `Informes emitidos: ${infs.map(i => `${i.codigo} (${fmt(i.fecha)})`).join(', ')}` : 'Aún no se ha emitido un informe para este caso.';
+      const evCode = (id) => db.evidencias.find(e => e.id === id).codigo;
+
+      $('#rep').innerHTML = `
+        <div class="report-head"><div><div class="eyebrow">Sistema de Cadena de Custodia de Evidencia Digital</div>
+          <h1>Informe de cadena de custodia · ${esc(inc.codigo)}</h1><div class="muted small">${esc(inc.descripcion)}</div></div>
+          <div class="small" style="text-align:right">Emitido: ${fmt(new Date().toISOString())}<br>Por: ${esc(S.nombre(u))} (${esc(S.rolDe(u).nombre)})<br>Estado del caso: ${badge(inc.estado)}</div></div>
+
+        <h2>1. Resumen</h2>
+        <div class="fields three">
+          <div class="field"><div class="k">Evidencias</div><div class="v">${evs.length}</div></div>
+          <div class="field"><div class="k">Transferencias</div><div class="v">${db.transferencias.filter(t => ids.includes(t.id_evidencia)).length}</div></div>
+          <div class="field"><div class="k">Accesos / análisis</div><div class="v">${db.solicitudes.filter(s => ids.includes(s.id_evidencia)).length} / ${db.analisis.filter(a => ids.includes(a.id_evidencia)).length}</div></div>
+          <div class="field"><div class="k">Verificaciones de integridad</div><div class="v">${db.verificaciones.filter(v => ids.includes(db.archivos.find(a => a.id === v.id_archivo).id_evidencia)).length}</div></div>
+          <div class="field"><div class="k">Alertas (pendientes)</div><div class="v">${db.alertas.filter(a => a.id_incidente === inc.id).length} (${db.alertas.filter(a => a.id_incidente === inc.id && a.estado !== 'Resuelta').length})</div></div>
+          <div class="field"><div class="k">Asuntos pendientes</div><div class="v">${checks.length ? esc(checks.map(c => c.nombre).join(', ')) : 'Ninguno'}</div></div>
+        </div>
+
+        <h2>2. Datos del incidente</h2>
+        <div class="fields three">
+          <div class="field"><div class="k">Tipo / prioridad</div><div class="v normal">${esc(inc.tipo)} · ${esc(inc.prioridad)}</div></div>
+          <div class="field"><div class="k">Fecha del incidente</div><div class="v normal">${fmt(inc.fecha_incidente)}</div></div>
+          <div class="field"><div class="k">Lugar</div><div class="v normal">${esc(inc.ubicacion)}</div></div>
+          <div class="field"><div class="k">Reportante</div><div class="v normal">${esc(S.userName(inc.id_reportante))} · ${fmt(inc.fecha_registro)}</div></div>
+          <div class="field"><div class="k">Cierre autorizado</div><div class="v normal">${inc.fecha_cierre ? `${esc(S.userName(inc.id_supervisor_cierre))} · ${fmt(inc.fecha_cierre)}` : 'Pendiente'}</div></div>
+          <div class="field"><div class="k">Archivo</div><div class="v normal">${inc.fecha_archivo ? fmt(inc.fecha_archivo) : '—'}</div></div>
+        </div>
+
+        <h2>3. Evidencias</h2>
+        ${tabla(['Código', 'Tipo', 'Descripción', 'Recolector', 'Responsable actual', 'Ubicación', 'Semáforo'],
+          evs.map(e => [`<b>${esc(e.codigo)}</b>`, esc(S.tipoDe(e).nombre), esc(e.descripcion), esc(S.userName(e.id_recolector)) + '<br><span class="muted">' + fmt(e.fecha_recoleccion) + '</span>', esc(S.userName(e.id_responsable)), esc(S.ubicName(e.id_ubicacion)), UI.sem(e)]), 'Sin evidencias.')}
+
+        ${evs.map(e => {
+          const arch = db.archivos.filter(a => a.id_evidencia === e.id);
+          const trs = db.transferencias.filter(t => t.id_evidencia === e.id);
+          const sols = db.solicitudes.filter(s => s.id_evidencia === e.id);
+          const ans = db.analisis.filter(a => a.id_evidencia === e.id);
+          const vers = db.verificaciones.filter(v => arch.some(a => a.id === v.id_archivo));
+          const als = db.alertas.filter(a => a.id_evidencia === e.id);
+          return `<h3>${esc(e.codigo)} · ${esc(e.descripcion)}</h3>
+            <p class="small muted">Origen: ${esc(e.origen)} · Lugar: ${esc(e.lugar)} · Medio: ${esc(e.medio)}${e.dispositivo ? ` · ${esc(e.dispositivo.marca)} ${esc(e.dispositivo.modelo)} serie ${esc(e.dispositivo.serie || 'N/D')}` : ''}${e.documento ? ` · ${e.documento.paginas} pág. · ${e.documento.digitalizado ? 'digitalizado' : 'pendiente de digitalización: ' + esc(e.documento.motivo_pendiente)}` : ''} · QR: <code>${esc(e.referencia_qr)}</code></p>
+            ${tabla(['Archivo', 'Tipo', 'Hash SHA-256 registrado'], arch.map(a => [esc(a.nombre), esc(a.tipo_archivo), `<code>${esc(a.hash_original)}</code>`]), 'Sin archivos digitales.')}
+            ${tabla(['Transferencia', 'Entrega → Recibe', 'Destino', 'Autorizó', 'Recepción', 'Estado'], trs.map(t => [esc(t.codigo) + '<br><span class="muted">' + esc(t.tipo) + '</span>', `${esc(S.userName(t.id_entrega))} → ${esc(S.userName(t.id_recibe))}<br><span class="muted">${esc(t.motivo)}</span>`, esc(t.id_ubicacion_destino ? S.ubicName(t.id_ubicacion_destino) : '—'), t.id_autoriza ? esc(S.userName(t.id_autoriza)) : (t.tipo === 'Entrega inicial' ? 'No requerida' : 'Pendiente'), fmt(t.fecha_recepcion), badge(t.estado)]), 'Sin transferencias.')}
+            ${sols.length ? tabla(['Solicitud', 'Analista', 'Periodo', 'Decisión', 'Estado'], sols.map(s => [esc(s.codigo), esc(S.userName(s.id_solicitante)), `${fmt(s.inicio)} – ${fmt(s.fin)}`, s.id_supervisor ? `${esc(s.decision)} · ${esc(S.userName(s.id_supervisor))}` : 'Pendiente', badge(S.estadoAcceso(s))]), '') : ''}
+            ${ans.length ? tabla(['Análisis', 'Procedimiento', 'Resultados', 'Conclusiones', 'Estado'], ans.map(a => [esc(a.codigo) + '<br><span class="muted">' + esc(S.userName(a.id_analista)) + '</span>', esc(a.procedimiento), esc(a.resultado), esc(a.conclusion), badge(a.estado)]), '') : ''}
+            ${vers.length ? tabla(['Verificación', 'Archivo', 'Usuario', 'Fecha', 'Resultado'], vers.map(v => [esc(v.codigo), esc(v.archivo_verificado), esc(S.userName(v.id_usuario)), fmt(v.fecha), badge(v.coincide ? 'Coincidente' : 'No coincidente', v.coincide ? 'green' : 'red')]), '') : ''}
+            ${als.length ? tabla(['Alerta', 'Tipo', 'Descripción', 'Resolución', 'Estado'], als.map(a => [esc(a.codigo), esc(a.tipo), esc(a.descripcion), a.resolucion ? `${esc(a.resolucion)}<br><span class="muted">${esc(S.userName(a.id_supervisor))} · ${fmt(a.fecha_resolucion)}</span>` : '—', badge(a.estado)]), '') : ''}`;
+        }).join('')}
+
+        <h2>4. Línea de tiempo del caso</h2>
+        ${tabla(['Fecha y hora', 'Usuario', 'Acción', 'Referencia', 'Detalle'], db.bitacora.filter(b => b.id_incidente === inc.id).map(b => [fmt(b.fecha), esc(b.usuario), esc(b.accion), esc(b.referencia), esc(b.detalle)]), 'Sin acciones.')}`;
+      history.replaceState(null, '', 'informe.html?inc=' + inc.id);
+    };
+    $('#sel').addEventListener('change', draw);
+    $('#btn-gen').onclick = () => { const inf = UI.intentar(() => S.generarInforme(+$('#sel').value)); if (inf) { UI.toast(`Informe ${inf.codigo} registrado en el sistema.`, 'ok'); draw(); } };
+    $('#btn-pdf').onclick = () => window.print();
+    draw();
+  }
+});
+</script>
+</body>
+</html>

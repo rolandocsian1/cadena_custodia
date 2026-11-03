@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Evidencias · CUSTODIA</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="icon" href="favicon.svg">
+  <script src="js/sha256.js"></script>
+  <script src="js/qr.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/ui.js"></script>
+</head>
+<body>
+<script>
+UI.page({
+  active: 'evidencias.html', perms: ['EVD_VER', 'EVD_CREAR'], modulo: 'Evidencias',
+  render(app, u) {
+    const S = Store, db = S.db, { esc, sem, header, footer, opts, $, $$ } = UI;
+    const evs = S.evidenciasVisibles(u);
+    const estados = ['Registrada', 'En entrega al custodio', 'Almacenada', 'Transferencia por autorizar', 'Transferida (pendiente de recepción)', 'En análisis', 'Archivada'];
+    const responsables = [...new Set(evs.map(e => e.id_responsable))].map(S.userById);
+    app.innerHTML = header('Búsqueda de evidencias', 'Evidencias', '',
+      S.can('EVD_CREAR') ? '<a class="btn primary" href="evidencia-nueva.html">+ Registrar evidencia</a>' : '') + `
+      <div class="card">
+        <div class="form-grid" style="grid-template-columns:repeat(3,minmax(0,1fr));gap:14px 20px;margin-bottom:18px" id="filtros">
+          <div><label class="lbl">Número de evidencia</label><input type="text" id="f-num" placeholder="EVD-2026-…"></div>
+          <div><label class="lbl">Incidente</label><select id="f-inc">${opts(S.incidentesVisibles(u), '', i => `${i.codigo} · ${i.descripcion}`, i => i.id, 'Todos')}</select></div>
+          <div><label class="lbl">Tipo</label><select id="f-tipo">${opts(db.tipos, '', t => t.nombre, t => t.id, 'Todos')}</select></div>
+          <div><label class="lbl">Estado</label><select id="f-est">${opts(estados, '', null, null, 'Todos')}</select></div>
+          <div><label class="lbl">Responsable</label><select id="f-resp">${opts(responsables, '', x => S.nombre(x), x => x.id, 'Todos')}</select></div>
+          <div><label class="lbl">Ubicación</label><select id="f-ubi">${opts(db.ubicaciones, '', x => x.nombre, x => x.id, 'Todas')}</select></div>
+        </div>
+        <div class="btn-row" style="margin-bottom:12px"><button class="btn sm" id="limpiar">Limpiar filtros</button><span class="small muted" id="cnt" style="align-self:center"></span></div>
+        <div class="table-wrap"><table class="tbl">
+          <thead><tr><th>Código</th><th>Tipo</th><th>Descripción</th><th>Incidente</th><th>Responsable</th><th>Ubicación</th><th>Estado</th><th>Semáforo</th></tr></thead>
+          <tbody id="rows"></tbody></table></div>
+      </div>`;
+
+    const draw = () => {
+      const t0 = performance.now();
+      const num = $('#f-num').value.trim().toLowerCase(), inc = $('#f-inc').value, tipo = $('#f-tipo').value,
+            est = $('#f-est').value, resp = $('#f-resp').value, ubi = $('#f-ubi').value;
+      const r = evs.filter(e => (!num || e.codigo.toLowerCase().includes(num) || e.descripcion.toLowerCase().includes(num))
+        && (!inc || e.id_incidente === +inc) && (!tipo || e.id_tipo === +tipo) && (!est || S.estadoEvidencia(e) === est)
+        && (!resp || e.id_responsable === +resp) && (!ubi || e.id_ubicacion === +ubi));
+      $('#rows').innerHTML = r.map(e => `<tr class="clickable" onclick="location.href='evidencia.html?id=${e.id}'">
+        <td><b>${esc(e.codigo)}</b></td><td>${esc(S.tipoDe(e).nombre)}</td><td>${esc(e.descripcion)}</td><td>${esc(S.incDe(e).codigo)}</td>
+        <td>${esc(S.userName(e.id_responsable))}</td><td>${esc(S.ubicName(e.id_ubicacion))}</td><td class="small">${esc(S.estadoEvidencia(e))}</td><td>${sem(e)}</td></tr>`).join('')
+        || '<tr><td colspan="8" class="empty">No se encontraron evidencias con los criterios indicados.</td></tr>';
+      $('#cnt').textContent = `${r.length} resultado(s)`;
+    };
+    $$('#filtros input, #filtros select').forEach(x => x.addEventListener('input', draw));
+    $('#limpiar').onclick = () => { $$('#filtros input, #filtros select').forEach(x => { x.value = ''; }); draw(); };
+    const pi = UI.param('inc'); if (pi) $('#f-inc').value = pi;
+    draw();
+  }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Solicitud de acceso · CUSTODIA</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="icon" href="favicon.svg">
+  <script src="js/sha256.js"></script>
+  <script src="js/qr.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/ui.js"></script>
+</head>
+<body>
+<script>
+UI.page({
+  active: 'solicitudes.html', perms: ['ACC_SOLICITAR', 'ACC_AUTORIZAR', 'AUD_CONSULTAR'], modulo: 'Solicitud de acceso',
+  render(app, u) {
+    const S = Store, db = S.db, { esc, fmt, badge, header, footer, $, toLocalInput, lockedBtn } = UI;
+    const s = db.solicitudes.find(x => x.id === +UI.param('id'));
+    if (!s || (!S.can('ACC_AUTORIZAR') && !S.can('AUD_CONSULTAR') && s.id_solicitante !== u.id)) return UI.notFound(app, 'Solicitud');
+    const ev = db.evidencias.find(e => e.id === s.id_evidencia);
+    const st = S.estadoAcceso(s);
+    const copia = s.id_copia && db.archivos.find(a => a.id === s.id_copia);
+    const revisar = st === 'Pendiente' && S.can('ACC_AUTORIZAR');
+    const propia = s.id_solicitante === u.id;
+    // Si el periodo pedido ya pasó, se sugiere uno nuevo a partir de ahora
+    const vencido = new Date(s.fin) <= new Date();
+    const iniSug = vencido ? new Date() : new Date(s.inicio), finSug = vencido ? new Date(Date.now() + 3 * 3600000) : new Date(s.fin);
+
+    app.innerHTML = header('Solicitudes de acceso', revisar ? 'Revisar solicitud de acceso' : 'Solicitud de acceso',
+      `${esc(s.codigo)} · <a href="evidencia.html?id=${ev.id}">${esc(ev.codigo)}</a> · ${esc(ev.descripcion)}`) + `
+      <div class="card">
+        <div class="card-head"><h2>Solicitud de ${esc(S.userName(s.id_solicitante))}</h2>${badge(st)}</div>
+        <div class="fields">
+          <div class="field"><div class="k">Acceso solicitado</div><div class="v">Copia para análisis</div></div>
+          <div class="field"><div class="k">Periodo</div><div class="v">${fmt(s.inicio)} a ${UI.fmtTime(s.fin)}${UI.fmtDate(s.inicio) !== UI.fmtDate(s.fin) ? ' del ' + UI.fmtDate(s.fin) : ''}</div></div>
+          <div class="field"><div class="k">Motivo</div><div class="v normal">${esc(s.motivo)}</div></div>
+          <div class="field"><div class="k">Fecha de solicitud</div><div class="v normal">${fmt(s.fecha_solicitud)}</div></div>
+          ${s.id_supervisor ? `<div class="field"><div class="k">Decisión</div><div class="v normal">${esc(s.decision)} por ${esc(S.userName(s.id_supervisor))} · ${fmt(s.fecha_decision)}</div></div>
+          <div class="field"><div class="k">Observación</div><div class="v normal">${esc(s.observacion || '—')}</div></div>` : ''}
+          ${copia ? `<div class="field"><div class="k">Copia autorizada</div><div class="v">${esc(copia.nombre)}</div></div>` : ''}
+          ${s.fecha_finalizacion ? `<div class="field"><div class="k">Finalización</div><div class="v normal">${fmt(s.fecha_finalizacion)}</div></div>` : ''}
+        </div>
+      </div>
+      <div id="accion"></div>`;
+
+    const acc = $('#accion');
+    if (revisar) {
+      acc.innerHTML = `<div class="card"><h2>Decisión del supervisor</h2>
+        ${vencido ? '<div class="alert warn"><b>El periodo solicitado ya pasó</b>Se propone un nuevo periodo a partir de ahora; puedes ajustarlo.</div>' : ''}
+        <div class="form-grid">
+          <div><label class="lbl">Inicio aprobado</label><input type="datetime-local" id="ini" value="${toLocalInput(iniSug)}"></div>
+          <div><label class="lbl">Fin aprobado</label><input type="datetime-local" id="fin" value="${toLocalInput(finSug)}"></div>
+          <div class="full"><label class="lbl">Observación</label><textarea id="obs" placeholder="Ej. Autorizar únicamente la copia identificada."></textarea></div>
+        </div>
+        <div class="form-actions"><button class="btn primary" id="ok">Aprobar acceso</button><button class="btn danger" id="no">Rechazar</button></div></div>`;
+      $('#ok').onclick = () => { if (UI.intentar(() => S.decidirAcceso(s.id, true, $('#obs').value, $('#ini').value, $('#fin').value))) UI.go(location.href, 'Acceso aprobado. Se preparó la copia autorizada.', 'ok'); };
+      $('#no').onclick = () => { if (UI.intentar(() => S.decidirAcceso(s.id, false, $('#obs').value))) UI.go(location.href, 'Solicitud rechazada.', 'warn'); };
+    } else if (st === 'Pendiente' && propia) {
+      acc.innerHTML = `<div class="card"><h2>Acciones</h2><div class="btn-row">${lockedBtn('Aprobar acceso', 'Nadie puede aprobar su propia solicitud; la decisión corresponde al supervisor.')}
+        ${lockedBtn('Analizar copia', 'El acceso aún no ha sido aprobado.')}</div></div>`;
+    } else if (st === 'Vigente' && propia) {
+      acc.innerHTML = `<div class="card"><div class="btn-row"><a class="btn primary" href="analisis.html?sol=${s.id}">Analizar copia autorizada</a></div></div>`;
+    } else if ((st === 'Vigente' || st === 'Programada') && S.can('ACC_AUTORIZAR')) {
+      acc.innerHTML = `<div class="card"><h2>Acciones</h2><button class="btn" id="fin-acc">Finalizar acceso</button></div>`;
+      $('#fin-acc').onclick = () => { if (UI.intentar(() => S.finalizarAcceso(s.id))) UI.go(location.href, 'Acceso finalizado.', 'ok'); };
+    }
+  }
+});
+</script>
+</body>
+</html>

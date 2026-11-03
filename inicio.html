@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Panel principal · CUSTODIA</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="icon" href="favicon.svg">
+  <script src="js/sha256.js"></script>
+  <script src="js/qr.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/ui.js"></script>
+</head>
+<body>
+<script>
+UI.page({
+  active: 'inicio.html',
+  render(app, u) {
+    const S = Store, db = S.db, { esc, fmt, badge, sem, header, footer } = UI;
+    const rol = S.rolDe(u).nombre;
+    const abiertos = S.incidentesVisibles(u).filter(i => i.estado === 'Abierto' || i.estado === 'En investigación');
+    const solPend = db.solicitudes.filter(s => s.decision === 'Pendiente');
+    const trPend = db.transferencias.filter(t => t.estado === 'Pendiente de autorización' || t.estado === 'Pendiente de recepción');
+    const alPend = db.alertas.filter(a => a.estado !== 'Resuelta');
+    const item = (t, s, href, btn) => `<div class="item"><div><div class="t">${t}</div><div class="s">${s}</div></div>${href ? `<a class="btn" href="${href}">${esc(btn)}</a>` : ''}</div>`;
+    const evc = (id) => db.evidencias.find(e => e.id === id).codigo;
+
+    let kpis = [];
+    let pend = [];
+
+    if (u.id_rol === 7) {
+      kpis = [['Usuarios activos', db.usuarios.filter(x => x.estado === 'Activo').length], ['Inactivos o bloqueados', db.usuarios.filter(x => x.estado !== 'Activo').length],
+              ['Tipos de evidencia', db.tipos.filter(t => t.estado).length], ['Ubicaciones', db.ubicaciones.filter(t => t.estado).length]];
+      db.usuarios.filter(x => x.estado === 'Bloqueado').forEach(x => pend.push(item(`Cuenta bloqueada · ${esc(S.nombre(x))}`, 'Superó los intentos de inicio de sesión permitidos.', 'admin.html', 'Revisar cuenta')));
+    } else if (u.id_rol === 1) {
+      const mios = S.incidentesVisibles(u);
+      kpis = [['Mis incidentes', mios.length], ['Abiertos o en investigación', abiertos.length], ['Cerrados o archivados', mios.length - abiertos.length]];
+      mios.slice().reverse().forEach(i => pend.push(item(`${esc(i.codigo)} · ${esc(i.descripcion)}`, `${fmt(i.fecha_registro)} · ${badge(i.estado)} · prioridad ${esc(i.prioridad)}`, 'incidente.html?id=' + i.id, 'Ver incidente')));
+    } else {
+      kpis = [['Incidentes abiertos', abiertos.length], ['Solicitudes pendientes', solPend.length], ['Transferencias pendientes', trPend.length], ['Alertas pendientes', alPend.length, alPend.length ? 'red' : '']];
+    }
+
+    if (S.can('ACC_AUTORIZAR')) solPend.forEach(s => pend.push(item(`Solicitud ${esc(s.codigo)}`, `${esc(S.userName(s.id_solicitante))} · copia de ${esc(evc(s.id_evidencia))} · ${esc(s.motivo)}`, 'solicitud.html?id=' + s.id, 'Revisar solicitud')));
+    if (S.can('TRF_AUTORIZAR')) db.transferencias.filter(t => t.estado === 'Pendiente de autorización').forEach(t => pend.push(item(`Transferencia ${esc(t.codigo)}`, `${esc(S.userName(t.id_entrega))} → ${esc(S.userName(t.id_recibe))} · ${esc(t.motivo)}`, 'transferencia.html?id=' + t.id, 'Revisar traslado')));
+    if (S.can('ALE_RESOLVER')) alPend.forEach(a => pend.push(item(`Alerta ${esc(a.codigo)} · ${esc(a.tipo)}`, esc(a.descripcion), 'alerta.html?id=' + a.id, 'Revisar alerta')));
+    if (S.can('CAS_CERRAR')) db.incidentes.filter(i => i.estado === 'En investigación' && S.puedeCerrar(i.id)).forEach(i => pend.push(item(`Caso ${esc(i.codigo)} listo para cierre`, 'Sin transferencias, accesos ni alertas pendientes.', 'cierre.html?inc=' + i.id, 'Revisar cierre')));
+    db.transferencias.filter(t => t.id_recibe === u.id && t.estado === 'Pendiente de recepción').forEach(t => pend.push(item(`Recepción ${esc(t.codigo)}`, `${esc(t.tipo)} de ${esc(evc(t.id_evidencia))} enviada por ${esc(S.userName(t.id_entrega))}`, 'transferencia.html?id=' + t.id, 'Confirmar recepción')));
+    db.transferencias.filter(t => t.id_recibe === u.id && t.estado === 'Pendiente de autorización').forEach(t => pend.push(item(`Traslado ${esc(t.codigo)} por recibir`, 'Esperando la autorización del supervisor antes de poder confirmar.', 'transferencia.html?id=' + t.id, 'Ver detalle')));
+    if (S.can('EVD_CREAR')) db.evidencias.filter(e => e.id_responsable === u.id && e.estado === 'Registrada' && !S.transferenciaPendiente(e.id)).forEach(e => pend.push(item(`${esc(e.codigo)} sin entregar al custodio`, `${esc(e.descripcion)}: debe registrarse y entregarse al custodio`, 'evidencia.html?id=' + e.id, 'Entregar al custodio')));
+    if (S.can('EVD_CREAR') || S.can('CUS_GESTIONAR')) db.evidencias.filter(e => e.documento && !e.documento.digitalizado && e.estado !== 'Archivada' && (e.id_responsable === u.id || e.id_recolector === u.id)).forEach(e => pend.push(item(`${esc(e.codigo)} pendiente de digitalización`, esc(e.documento.motivo_pendiente), 'evidencia.html?id=' + e.id, 'Adjuntar escaneo')));
+    if (S.can('ANA_REGISTRAR')) db.solicitudes.filter(s => s.id_solicitante === u.id).forEach(s => {
+      const st = S.estadoAcceso(s);
+      if (st === 'Vigente') pend.push(item(`Acceso ${esc(s.codigo)} vigente`, `Copia de ${esc(evc(s.id_evidencia))} hasta ${fmt(s.fin)}`, 'analisis.html?sol=' + s.id, 'Registrar análisis'));
+      if (st === 'Pendiente') pend.push(item(`Solicitud ${esc(s.codigo)} en espera`, 'El supervisor aún no ha resuelto la solicitud.', null));
+    });
+    if (u.id_rol === 6) db.bitacora.slice(-5).reverse().forEach(b => pend.push(item(`${fmt(b.fecha)} · ${esc(b.accion)}`, `${esc(b.usuario)} · ${esc(b.referencia)}`, null)));
+
+    const evs = S.evidenciasVisibles(u);
+    const verSemaforo = S.can('EVD_VER') || S.can('EVD_CREAR');
+    const cnt = (c) => evs.filter(e => S.semaforo(e).color === c).length;
+
+    app.innerHTML = header('Panel principal', `Hola, ${S.nombre(u).split(' ')[0]}`,
+      esc(rol)) + `
+      <div class="grid grid-${Math.min(kpis.length, 4)}" style="margin-bottom:22px">
+        ${kpis.map(k => `<div class="card kpi ${k[2] || ''}"><div class="label">${esc(k[0])}</div><div class="value">${k[1]}</div></div>`).join('')}
+      </div>
+      <div class="card">
+        <h2>${u.id_rol === 6 ? 'Actividad reciente' : u.id_rol === 1 ? 'Mis incidentes reportados' : 'Pendientes de revisión'}</h2>
+        ${pend.length ? pend.join('') : '<div class="empty">No tienes asuntos pendientes.</div>'}
+        ${u.id_rol === 1 ? '<div class="form-actions"><a class="btn primary" href="incidente-nuevo.html">Registrar incidente</a></div>' : ''}
+        ${u.id_rol === 6 ? '<div class="form-actions"><a class="btn" href="bitacora.html">Abrir bitácora completa</a></div>' : ''}
+      </div>
+      ${verSemaforo ? `
+      <div class="card">
+        <div class="card-head"><h2>Integridad y custodia</h2>
+          <div class="legend"><span class="badge green"><span class="dot green"></span>Verde · íntegra (${cnt('green')})</span>
+          <span class="badge yellow"><span class="dot yellow"></span>Amarillo · traslado / análisis (${cnt('yellow')})</span>
+          <span class="badge red"><span class="dot red"></span>Rojo · incumplimiento (${cnt('red')})</span></div></div>
+        <div class="table-wrap"><table class="tbl">
+          <thead><tr><th>Código</th><th>Evidencia</th><th>Incidente</th><th>Responsable</th><th>Ubicación</th><th>Semáforo</th></tr></thead>
+          <tbody>${evs.map(e => `<tr class="clickable" onclick="location.href='evidencia.html?id=${e.id}'">
+            <td><b>${esc(e.codigo)}</b></td><td>${esc(e.descripcion)}</td><td>${esc(S.incDe(e).codigo)}</td>
+            <td>${esc(S.userName(e.id_responsable))}</td><td>${esc(S.ubicName(e.id_ubicacion))}</td><td>${sem(e)}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">Sin evidencias registradas.</td></tr>'}</tbody>
+        </table></div>
+      </div>` : ''}
+      `;
+  }
+});
+</script>
+</body>
+</html>

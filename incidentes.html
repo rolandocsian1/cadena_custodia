@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Incidentes · CUSTODIA</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="icon" href="favicon.svg">
+  <script src="js/sha256.js"></script>
+  <script src="js/qr.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/ui.js"></script>
+</head>
+<body>
+<script>
+UI.page({
+  active: 'incidentes.html', perms: ['INC_VER', 'INC_CREAR'], modulo: 'Incidentes',
+  render(app, u) {
+    const S = Store, db = S.db, { esc, fmt, badge, header, footer, opts, $ } = UI;
+    const lista = S.incidentesVisibles(u);
+    app.innerHTML = header('Registro de incidentes', 'Incidentes',
+      '',
+      S.can('INC_CREAR') ? '<a class="btn primary" href="incidente-nuevo.html">+ Registrar incidente</a>' : '') + `
+      <div class="card">
+        <div class="form-grid" style="grid-template-columns:2fr 1fr 1fr;margin-bottom:16px">
+          <div><label class="lbl">Buscar</label><input type="text" id="f-q" placeholder="Código, descripción o lugar"></div>
+          <div><label class="lbl">Estado</label><select id="f-estado">${opts(['Abierto', 'En investigación', 'Cerrado', 'Archivado'], '', null, null, 'Todos')}</select></div>
+          <div><label class="lbl">Prioridad</label><select id="f-prio">${opts(S.PRIORIDADES, '', null, null, 'Todas')}</select></div>
+        </div>
+        <div class="table-wrap"><table class="tbl">
+          <thead><tr><th>Código</th><th>Descripción</th><th>Tipo</th><th>Prioridad</th><th>Registro</th><th>Evidencias</th><th>Estado</th></tr></thead>
+          <tbody id="rows"></tbody></table></div>
+      </div>`;
+
+    const draw = () => {
+      const q = $('#f-q').value.toLowerCase(), est = $('#f-estado').value, pr = $('#f-prio').value;
+      const r = lista.filter(i => (!q || [i.codigo, i.descripcion, i.ubicacion].join(' ').toLowerCase().includes(q)) && (!est || i.estado === est) && (!pr || i.prioridad === pr));
+      $('#rows').innerHTML = r.slice().reverse().map(i => `<tr class="clickable" onclick="location.href='incidente.html?id=${i.id}'">
+        <td><b>${esc(i.codigo)}</b></td><td>${esc(i.descripcion)}<div class="small muted">${esc(i.ubicacion)}</div></td><td>${esc(i.tipo)}</td>
+        <td>${badge(i.prioridad)}</td><td class="small">${fmt(i.fecha_registro)}<div class="muted">${esc(S.userName(i.id_reportante))}</div></td>
+        <td>${db.evidencias.filter(e => e.id_incidente === i.id).length}</td><td>${badge(i.estado)}</td></tr>`).join('')
+        || '<tr><td colspan="7" class="empty">No hay incidentes que coincidan con la búsqueda.</td></tr>';
+    };
+    ['#f-q', '#f-estado', '#f-prio'].forEach(s => $(s).addEventListener('input', draw));
+    draw();
+  }
+});
+</script>
+</body>
+</html>

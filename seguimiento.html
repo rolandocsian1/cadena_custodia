@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Línea de tiempo · CUSTODIA</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="icon" href="favicon.svg">
+  <script src="js/sha256.js"></script>
+  <script src="js/qr.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/ui.js"></script>
+</head>
+<body>
+<script>
+UI.page({
+  active: 'seguimiento.html', perms: ['SEG_VER'], modulo: 'Línea de tiempo',
+  render(app, u) {
+    const S = Store, db = S.db, { esc, fmtTime, fmtDate, header, footer, opts, $ } = UI;
+    const evs = S.evidenciasVisibles(u);
+    const pEv = UI.param('ev'), pInc = UI.param('inc');
+    const sel = pEv ? 'ev:' + pEv : pInc ? 'inc:' + pInc : (evs[0] ? 'ev:' + evs[0].id : '');
+    const options = db.incidentes.map(i => `<optgroup label="${esc(i.codigo)} · ${esc(i.descripcion)}">
+      <option value="inc:${i.id}" ${sel === 'inc:' + i.id ? 'selected' : ''}>Todo el caso ${esc(i.codigo)}</option>
+      ${evs.filter(e => e.id_incidente === i.id).map(e => `<option value="ev:${e.id}" ${sel === 'ev:' + e.id ? 'selected' : ''}>${esc(e.codigo)} · ${esc(e.descripcion)}</option>`).join('')}</optgroup>`).join('');
+
+    const color = (a) => /denegad|rechaz|fallido|bloquead|NO coincidente|Suspendió|inconsistencia|Generó alerta/i.test(a.accion + a.detalle) ? 'red'
+      : /Resolvió|Confirmó|Aprobó|Autorizó|coincidente|Finalizó|cierre|Archivó/i.test(a.accion + a.detalle) ? 'green'
+      : /Solicitó|Entregó|revisión/i.test(a.accion) ? 'yellow' : '';
+
+    app.innerHTML = header('Seguimiento', 'Línea de tiempo', '') + `
+      <div class="card no-print"><label class="lbl">Evidencia o caso</label><select id="sel" style="max-width:640px">${options}</select></div>
+      <div class="card" id="tl"></div>`;
+
+    const draw = () => {
+      const [k, id] = $('#sel').value.split(':');
+      const items = db.bitacora.filter(b => k === 'ev' ? b.id_evidencia === +id : b.id_incidente === +id).sort((a, b) => a.fecha.localeCompare(b.fecha));
+      const titulo = k === 'ev' ? `Cadena de custodia de ${db.evidencias.find(e => e.id === +id).codigo}` : `Caso ${db.incidentes.find(i => i.id === +id).codigo}`;
+      let lastDay = '';
+      $('#tl').innerHTML = `<div class="card-head"><h2>${esc(titulo)}</h2><span class="small muted">${items.length} acción(es)</span></div>
+        ${items.length ? `<ul class="timeline">${items.map(b => {
+          const day = fmtDate(b.fecha), showDay = day !== lastDay; lastDay = day;
+          return `<li><div class="time">${fmtTime(b.fecha)}${showDay ? `<small>${day}</small>` : ''}</div><div class="mark ${color(b)}"></div>
+            <div class="body"><b>${esc(b.accion)}</b><span>${esc(b.usuario)} · ${esc(b.referencia)}${b.detalle ? ' · ' + esc(b.detalle) : ''}</span></div></li>`;
+        }).join('')}</ul>` : '<div class="empty">Sin acciones registradas.</div>'}`;
+      history.replaceState(null, '', `seguimiento.html?${k}=${id}`);
+    };
+    $('#sel').addEventListener('change', draw);
+    if (sel) draw(); else $('#tl').innerHTML = '<div class="empty">No hay evidencias para consultar.</div>';
+  }
+});
+</script>
+</body>
+</html>

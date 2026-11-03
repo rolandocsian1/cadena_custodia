@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Consulta por QR · CUSTODIA</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="icon" href="favicon.svg">
+  <script src="js/sha256.js"></script>
+  <script src="js/qr.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/ui.js"></script>
+</head>
+<body>
+  <!-- Esta página es pública: simula lo que ocurre al leer la etiqueta QR.
+       Solo revela la ficha si hay sesión y el rol tiene permiso. -->
+  <div class="login-main" style="min-height:100vh">
+    <div class="login-card" style="max-width:600px">
+      <div class="eyebrow">Consulta por código QR</div>
+      <h2 style="font-size:22px;margin-bottom:6px">Referencia de evidencia</h2>
+      <form id="f" style="display:flex;gap:10px;margin:14px 0"><input type="text" id="ref" placeholder="CUSTODIA|EVD-2026-0001|…"><button class="btn primary" type="submit">Consultar</button></form>
+      <div id="res"></div>
+      <p class="note"><a href="index.html">Ir al inicio de sesión</a></p>
+    </div>
+  </div>
+  <script>
+    const S = Store, { esc, $ } = UI;
+    const consultar = (ref) => {
+      const box = $('#res');
+      const partes = String(ref).trim().split('|');
+      const ev = S.db.evidencias.find(e => e.referencia_qr === String(ref).trim());
+      if (partes[0] !== 'CUSTODIA' || !ev) {
+        box.innerHTML = '<div class="alert error"><b>Referencia no válida</b>El código no corresponde a una evidencia registrada o fue alterado.</div>';
+        return;
+      }
+      const u = S.me();
+      if (!u) {
+        box.innerHTML = `<div class="alert warn"><b>Referencia protegida · ${esc(partes[1])}</b>Para consultar la ficha debes iniciar sesión. La etiqueta no expone archivos ni datos confidenciales.</div>
+          <a class="btn primary" href="index.html?next=${encodeURIComponent('evidencia.html?id=' + ev.id)}">Iniciar sesión para consultar</a>`;
+        return;
+      }
+      if (!S.can('EVD_VER', u) && !(S.can('EVD_CREAR', u) && ev.id_recolector === u.id)) {
+        S.log('Acceso denegado', 'QR', ev.codigo, 'Consulta de referencia QR sin permiso para ver evidencias', { inc: ev.id_incidente, ev: ev.id });
+        S.save();
+        box.innerHTML = `<div class="alert error"><b>Acceso denegado</b>Tu rol (${esc(S.rolDe(u).nombre)}) no tiene permiso para consultar evidencias. El intento quedó registrado.</div>`;
+        return;
+      }
+      S.log('Consultó evidencia por QR', 'QR', ev.codigo, '', { inc: ev.id_incidente, ev: ev.id });
+      S.save();
+      location.href = 'evidencia.html?id=' + ev.id;
+    };
+    $('#f').addEventListener('submit', (e) => { e.preventDefault(); consultar($('#ref').value); });
+    const r = UI.param('ref');
+    if (r) { $('#ref').value = r; consultar(r); }
+  </script>
+</body>
+</html>

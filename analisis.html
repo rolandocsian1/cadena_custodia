@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Análisis forense · CUSTODIA</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="icon" href="favicon.svg">
+  <script src="js/sha256.js"></script>
+  <script src="js/qr.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/ui.js"></script>
+</head>
+<body>
+<script>
+UI.page({
+  active: 'analisis.html', perms: ['ANA_REGISTRAR', 'AUD_CONSULTAR'], modulo: 'Análisis forense',
+  render(app, u) {
+    const S = Store, db = S.db, { esc, fmt, badge, header, footer, $, shortHash, lockedBtn } = UI;
+    const idSol = +UI.param('sol');
+
+    // ------------------------------------------------ Lista
+    if (!idSol) {
+      const mias = db.solicitudes.filter(s => s.decision === 'Aprobada' && (s.id_solicitante === u.id || S.can('AUD_CONSULTAR')));
+      const ans = db.analisis.filter(a => a.id_analista === u.id || S.can('AUD_CONSULTAR')).slice().reverse();
+      app.innerHTML = header('Registro de análisis forenses', 'Análisis', '',
+        S.can('ACC_SOLICITAR') ? '<a class="btn" href="solicitud-nueva.html">Solicitar acceso</a>' : '') + `
+        <div class="card"><h2>Accesos aprobados</h2><div class="table-wrap"><table class="tbl">
+          <thead><tr><th>Solicitud</th><th>Evidencia</th><th>Analista</th><th>Periodo</th><th>Estado</th><th></th></tr></thead>
+          <tbody>${mias.slice().reverse().map(s => { const ev = db.evidencias.find(e => e.id === s.id_evidencia), st = S.estadoAcceso(s);
+            return `<tr><td><b>${esc(s.codigo)}</b></td><td>${esc(ev.codigo)}<div class="small muted">${esc(ev.descripcion)}</div></td><td>${esc(S.userName(s.id_solicitante))}</td>
+            <td class="small">${fmt(s.inicio)}<br>${fmt(s.fin)}</td><td>${badge(st)}</td><td><a class="btn sm ${st === 'Vigente' && s.id_solicitante === u.id ? 'primary' : ''}" href="analisis.html?sol=${s.id}">${st === 'Vigente' && s.id_solicitante === u.id ? 'Analizar' : 'Ver'}</a></td></tr>`; }).join('')
+            || '<tr><td colspan="6" class="empty">No hay accesos aprobados. Solicita acceso a una evidencia para trabajar sobre su copia.</td></tr>'}</tbody></table></div></div>
+        <div class="card"><h2>Análisis registrados</h2><div class="table-wrap"><table class="tbl">
+          <thead><tr><th>Código</th><th>Evidencia</th><th>Analista</th><th>Inicio</th><th>Estado</th><th></th></tr></thead>
+          <tbody>${ans.map(a => `<tr><td><b>${esc(a.codigo)}</b></td><td>${esc(db.evidencias.find(e => e.id === a.id_evidencia).codigo)}</td><td>${esc(S.userName(a.id_analista))}</td>
+            <td class="small">${fmt(a.fecha_inicio)}</td><td>${badge(a.estado)}</td><td><a class="btn sm" href="analisis.html?sol=${a.id_solicitud}">Ver</a></td></tr>`).join('')
+            || '<tr><td colspan="6" class="empty">Sin análisis registrados.</td></tr>'}</tbody></table></div></div>
+        `;
+      return;
+    }
+
+    // ------------------------------------------------ Espacio de análisis
+    const s = db.solicitudes.find(x => x.id === idSol);
+    if (!s || s.decision !== 'Aprobada' || (s.id_solicitante !== u.id && !S.can('AUD_CONSULTAR'))) {
+      app.innerHTML = header('Registro de análisis', 'Acceso no autorizado', '') + `<div class="alert error"><b>No existe un acceso aprobado para esta copia.</b>El análisis solo puede realizarse con una solicitud aprobada y vigente.</div><a class="btn" href="analisis.html">Volver</a>`;
+      return;
+    }
+    const ev = db.evidencias.find(e => e.id === s.id_evidencia);
+    const st = S.estadoAcceso(s);
+    const p = S.puedeAnalizar(s);
+    const copia = p.copia, origen = db.archivos.find(a => a.id === copia.id_origen);
+    const v = p.verificacion;
+    const an = db.analisis.filter(a => a.id_solicitud === s.id).pop();
+    const soloLectura = s.id_solicitante !== u.id || st !== 'Vigente' || (an && an.estado === 'Finalizado');
+    const alerta = v && !v.coincide ? db.alertas.find(a => a.id_verificacion === v.id) : null;
+
+    app.innerHTML = header('Registro de análisis', v && !v.coincide ? 'Verificación no coincidente' : 'Registrar análisis',
+      `${esc(ev.codigo)} · copia ${esc(copia.codigo || copia.nombre)} · ${esc(s.codigo)} aprobada · acceso ${badge(st)} hasta ${fmt(s.fin)}`) + `
+      ${v && !v.coincide ? `<div class="alert error"><b>Análisis suspendido</b>El hash de la copia no coincide. Se generó ${alerta ? esc(alerta.codigo) : 'una alerta'} y se bloquea el cierre del caso. El supervisor debe documentar el hallazgo; para reanudar, se verifica una copia válida.</div>` : ''}
+      <div class="card">
+        <div class="card-head"><h2>Integridad de la copia</h2>${v ? badge(v.coincide ? 'Coincidente' : 'No coincidente', v.coincide ? 'green' : 'red') : badge('Sin verificar', 'yellow')}</div>
+        <div class="fields">
+          <div class="field"><div class="k">Hash de referencia (${esc(origen.nombre)})</div><div class="v"><code title="${esc(copia.hash_original)}">${shortHash(copia.hash_original)}</code></div></div>
+          <div class="field"><div class="k">Hash ${v ? 'calculado de la copia' : 'de la copia'}</div><div class="v"><code ${v && !v.coincide ? 'style="color:var(--red)"' : ''}>${v ? shortHash(v.hash_calculado) : 'Pendiente de verificar'}</code></div></div>
+        </div>
+        ${!soloLectura ? `<div class="form-actions"><button class="btn ${v && v.coincide ? '' : 'primary'}" id="btn-ver">${v ? 'Verificar otra copia' : 'Verificar copia'}</button>
+          <button class="btn danger" id="btn-orig">Intentar trabajar sobre el original</button></div>` : ''}
+      </div>
+      <form class="card" id="f" novalidate>
+        <h2>Documentación del análisis</h2>
+        ${!p.ok && !soloLectura ? '<div class="alert warn"><b>Bloqueado</b>Verifica primero la integridad de la copia autorizada; el hash debe coincidir.</div>' : ''}
+        <label class="lbl">Procedimiento <span class="req">*</span></label><textarea name="procedimiento" placeholder="Ej. Revisión controlada de archivos en la copia.">${esc(an ? an.procedimiento : '')}</textarea>
+        <div style="height:12px"></div>
+        <label class="lbl">Resultados</label><textarea name="resultado" placeholder="Ej. Se identificó un archivo para revisión adicional.">${esc(an ? an.resultado : '')}</textarea>
+        <div style="height:12px"></div>
+        <label class="lbl">Conclusiones</label><textarea name="conclusion" placeholder="Ej. Los hallazgos requieren correlación con los registros del equipo.">${esc(an ? an.conclusion : '')}</textarea>
+        ${an ? `<p class="note">${esc(an.codigo)} · ${badge(an.estado)} · inicio ${fmt(an.fecha_inicio)}${an.fecha_fin ? ' · fin ' + fmt(an.fecha_fin) : ''}</p>` : ''}
+        <div class="form-actions" id="acciones"></div>
+      </form>
+      `;
+
+    const f = $('#f');
+    if (soloLectura || !p.ok) f.querySelectorAll('textarea').forEach(t => { t.readOnly = true; });
+    const acc = $('#acciones');
+    if (!soloLectura) {
+      acc.innerHTML = p.ok
+        ? '<button class="btn" type="button" id="g">Guardar análisis</button><button class="btn primary" type="button" id="fz">Finalizar análisis</button><button class="btn" type="button" id="fa">Finalizar acceso</button>'
+        : lockedBtn('Guardar análisis', 'Verifica primero la integridad de la copia.') + '<button class="btn" type="button" id="fa">Finalizar acceso</button>';
+    } else if (s.id_solicitante === u.id && st === 'Vigente') {
+      acc.innerHTML = '<button class="btn primary" type="button" id="fa">Finalizar acceso</button>';
+    }
+    const guardar = (fin) => {
+      const r = UI.intentar(() => S.guardarAnalisis(s.id, UI.formData(f), fin));
+      if (r) UI.go(location.href, fin ? `Análisis ${r.codigo} finalizado. Puedes finalizar el acceso.` : `Análisis ${r.codigo} guardado.`, 'ok');
+    };
+    if ($('#g')) $('#g').onclick = () => guardar(false);
+    if ($('#fz')) $('#fz').onclick = () => guardar(true);
+    if ($('#fa')) $('#fa').onclick = async () => {
+      if (await UI.confirmar('Finalizar acceso', 'La copia de trabajo dejará de estar disponible. Esta acción libera el pendiente para el cierre del caso.', 'Finalizar acceso'))
+        if (UI.intentar(() => S.finalizarAcceso(s.id))) UI.go('analisis.html', 'Acceso finalizado.', 'ok');
+    };
+    if ($('#btn-ver')) $('#btn-ver').onclick = () => UI.dialogoVerificacion(copia, () => {
+      document.querySelector('.modal-back [data-close]').addEventListener('click', () => location.reload());
+    });
+    if ($('#btn-orig')) $('#btn-orig').onclick = async () => {
+      if (!await UI.confirmar('Abrir archivo original', `Se intentará abrir ${esc(origen.nombre)} directamente, sin usar la copia autorizada.`, 'Intentar', true)) return;
+      const r = S.abrirOriginal(origen.id);
+      if (!r.permitido) UI.go(location.href, `Bloqueado: el analista debe trabajar sobre la copia. Se generó la alerta ${r.alerta.codigo}.`, 'error');
+    };
+  }
+});
+</script>
+</body>
+</html>

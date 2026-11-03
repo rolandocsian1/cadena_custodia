@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Registrar incidente · CUSTODIA</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="icon" href="favicon.svg">
+  <script src="js/sha256.js"></script>
+  <script src="js/qr.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/ui.js"></script>
+</head>
+<body>
+<script>
+UI.page({
+  active: 'incidentes.html', perms: ['INC_CREAR'], modulo: 'Registrar incidente',
+  render(app, u) {
+    const S = Store, { esc, fmt, header, footer, opts, $, toLocalInput } = UI;
+    app.innerHTML = header('Registro de incidentes', 'Registrar incidente', 'Describe lo ocurrido. El código se asignará después de guardar.') + `
+      <form class="card" id="f" novalidate>
+        <h2>Información inicial</h2>
+        <div class="form-grid">
+          <div class="full"><label class="lbl">Descripción <span class="req">*</span></label>
+            <input type="text" name="descripcion" maxlength="200" placeholder="Ej. Acceso no autorizado a equipo institucional"></div>
+          <div><label class="lbl">Fecha y hora del incidente <span class="req">*</span></label>
+            <input type="datetime-local" name="fecha_incidente" max="${toLocalInput()}" value="${toLocalInput()}"></div>
+          <div><label class="lbl">Lugar <span class="req">*</span></label><input type="text" name="ubicacion" placeholder="Ej. Oficina administrativa"></div>
+          <div><label class="lbl">Tipo <span class="req">*</span></label><select name="tipo">${opts(S.TIPOS_INCIDENTE, '', null, null, 'Seleccione…')}</select></div>
+          <div><label class="lbl">Prioridad <span class="req">*</span></label><select name="prioridad">${opts(S.PRIORIDADES, '', null, null, 'Seleccione…')}</select></div>
+          <div class="full"><label class="lbl">Detalle adicional y elementos relacionados</label>
+            <textarea name="detalle" placeholder="Qué se observó, equipos o archivos involucrados, personas que lo detectaron…"></textarea></div>
+          <div><label class="lbl">Reportante (automático)</label><input type="text" readonly value="${esc(S.nombre(u))}"></div>
+          <div><label class="lbl">Fecha de registro (automática)</label><input type="text" readonly id="freg" value="${fmt(new Date().toISOString())}"></div>
+        </div>
+        <div class="form-actions">
+          <button class="btn primary" type="submit">Guardar incidente</button>
+          <a class="btn" href="incidentes.html">Cancelar</a>
+        </div>
+      </form>`;
+    setInterval(() => { $('#freg').value = fmt(new Date().toISOString()); }, 20000);
+    $('#f').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const inc = UI.intentar(() => S.crearIncidente(UI.formData(e.target)));
+      if (inc) UI.go('incidente.html?id=' + inc.id, `Incidente ${inc.codigo} registrado correctamente.`, 'ok');
+    });
+  }
+});
+</script>
+</body>
+</html>
